@@ -517,10 +517,11 @@ async def _exec_docker_cmd_simple(cwd: str, cmd_list: list) -> str:
 
 # ==================== Docker 环境工具实现 (含新功能) ====================
 
-async def docker_sandbox(command: str, background: bool = False) -> str | AsyncIterator[str]:
+async def docker_sandbox(command: str, background: bool = False, timeout: int = 60) -> AsyncIterator[str]:
     """
     [Docker] 沙盒执行（打平版，直接返回异步生成器）
     """
+    effective_timeout = max(1, min(timeout, 3600))
     settings = await load_settings()
     cwd = settings.get("CLISettings", {}).get("cc_path")
     if not cwd:
@@ -544,7 +545,7 @@ async def docker_sandbox(command: str, background: bool = False) -> str | AsyncI
 
         if background:
             pid = await process_manager.register_process(process, f"[Docker] {command}", "docker")
-            yield f"[SUCCESS] Docker background process started.\nPID: {pid}"
+            yield f"[SUCCESS] Docker PID: {pid}"
             return
 
         queue = asyncio.Queue()
@@ -561,7 +562,7 @@ async def docker_sandbox(command: str, background: bool = False) -> str | AsyncI
         start_time = time.time()
         try:
             while not (stdout_task.done() and stderr_task.done() and queue.empty()):
-                remaining = COMMAND_TIMEOUT - (time.time() - start_time)
+                remaining = effective_timeout - (time.time() - start_time)
                 if remaining <= 0:
                     raise asyncio.TimeoutError()
                 try:
@@ -569,14 +570,12 @@ async def docker_sandbox(command: str, background: bool = False) -> str | AsyncI
                     yield content
                 except asyncio.TimeoutError:
                     continue
-
+            
             await process.wait()
-            if process.returncode != 0:
-                yield f"\n--- Docker 运行结束 (Exit Code: {process.returncode}) ---"
-                yield get_detailed_exit_info(process.returncode, command)
+
         except asyncio.TimeoutError:
             process.kill()
-            yield f"\n\n[TIMEOUT ERROR] Docker 命令执行超时（限时 {COMMAND_TIMEOUT} 秒）。"
+            yield f"\n\n[TIMEOUT ERROR] Docker 命令执行超过 {effective_timeout} 秒已强制终止。"
     except Exception as e:
         yield f"[ERROR] Docker 进程启动失败: {str(e)}"
 
@@ -1118,16 +1117,18 @@ async def read_stream(stream, *, is_error: bool = False):
         yield f"{prefix}{decoded}"
 
 
-async def shell_tool_local(command: str, background: bool = False) -> str | AsyncIterator[str]:
+async def shell_tool_local(command: str, background: bool = False, timeout: int = 60) -> AsyncIterator[str]:
     """
-    [Local] 执行本地命令（打平版，直接返回异步生成器）
+    [Local] 执行本地命令（支持动态超时）
     """
+    # 限制超时范围：1秒到1小时
+    effective_timeout = max(1, min(timeout, 3600))
+    
     settings = await load_settings()
     cwd = settings.get("CLISettings", {}).get("cc_path")
     perm = settings.get("localEnvSettings", {}).get("permissionMode", "default")
     
     if not cwd: 
-        # 如果是生成器，错误也需要 yield 出来
         yield "Error: No workspace directory specified."
         return
     
@@ -1165,9 +1166,7 @@ async def shell_tool_local(command: str, background: bool = False) -> str | Asyn
             yield f"[SUCCESS] Background process started.\nPID: {pid}"
             return
 
-        # --- 直接开始 yield 逻辑 ---
         queue = asyncio.Queue()
-        
         async def wrap_stdout():
             async for chunk in read_stream_chunks(process.stdout, ""):
                 await queue.put(chunk)
@@ -1181,7 +1180,8 @@ async def shell_tool_local(command: str, background: bool = False) -> str | Asyn
         start_time = time.time()
         try:
             while not (stdout_task.done() and stderr_task.done() and queue.empty()):
-                remaining = COMMAND_TIMEOUT - (time.time() - start_time)
+                # 使用传入的 effective_timeout
+                remaining = effective_timeout - (time.time() - start_time)
                 if remaining <= 0:
                     raise asyncio.TimeoutError()
                 try:
@@ -1195,12 +1195,14 @@ async def shell_tool_local(command: str, background: bool = False) -> str | Asyn
                 yield f"\n--- 运行结束 (Exit Code: {process.returncode}) ---"
                 yield get_detailed_exit_info(process.returncode, command)
         except asyncio.TimeoutError:
+            # 杀进程树逻辑保持不变...
             if system == "Windows":
                 subprocess.run(f"taskkill /F /T /PID {process.pid}", shell=True, capture_output=True)
             else:
                 try: os.killpg(os.getpgid(process.pid), signal.SIGKILL)
                 except: process.kill()
-            yield f"\n\n[TIMEOUT ERROR] 命令执行超过 {COMMAND_TIMEOUT} 秒已强制终止。"
+            yield f"\n\n[TIMEOUT ERROR] 命令执行超过 {effective_timeout} 秒已强制终止。"
+            yield "\n💡 提示：对于启动应用或大文件下载，请使用 'background': true。"
     except Exception as e: 
         yield f"[系统错误] 无法启动进程: {str(e)}"
 
@@ -1876,6 +1878,13 @@ async def read_skill_tool_local(skill_id: str) -> str:
     cwd = await _get_current_cwd()
     return await read_skill_tool_logic(cwd, skill_id, is_docker=False)
 
+COMMON_BASH_DESC = (
+    "Execute commands. Guidance: \n"
+    "1. For long-running tasks (servers, watchers, large downloads), set 'background': true.\n"
+    "2. For medium tasks, adjust 'timeout' (1-3600s, default 60s).\n"
+    "3. If 'background' is true, wait a few seconds for initialization before checking logs/status; do not poll rapidly."
+)
+
 # ==================== 工具注册表 (完整) ====================
 
 TOOLS_REGISTRY = {
@@ -2066,12 +2075,17 @@ TOOLS_REGISTRY = {
     "bash": {
         "type": "function", "function": {
             "name": "docker_sandbox", 
-            "description": "Run bash in Docker.",
+            "description": f"[Docker] {COMMON_BASH_DESC}",
             "parameters": {
                 "type": "object", 
                 "properties": {
                     "command": {"type": "string"}, 
-                    "background": {"type": "boolean", "description": "Run non-blocking (server/watcher). Returns PID."}
+                    "background": {"type": "boolean", "description": "Run non-blocking. Returns PID."},
+                    "timeout": {
+                        "type": "integer", 
+                        "default": 60, 
+                        "description": "Max execution time in seconds (1-3600). Default 60."
+                    }
                 }, 
                 "required": ["command"]
             }
@@ -2292,12 +2306,17 @@ LOCAL_TOOLS_REGISTRY = {
     "bash_local": {
         "type": "function", "function": {
             "name": "shell_tool_local", 
-            "description": "Run local command.Please note the environment in which you are currently executing the command.",
+            "description": f"[Local] {COMMON_BASH_DESC}",
             "parameters": {
                 "type": "object", 
                 "properties": {
                     "command": {"type": "string"},
-                    "background": {"type": "boolean", "description": "Run in background."}
+                    "background": {"type": "boolean", "description": "Run in background."},
+                    "timeout": {
+                        "type": "integer", 
+                        "default": 60, 
+                        "description": "Max execution time in seconds (1-3600). Default 60."
+                    }
                 }, 
                 "required": ["command"]
             }
