@@ -1944,7 +1944,6 @@ let vue_methods = {
       }
       else if (data.type === 'settings') {
           this.ensureConversationGroups();
-          this.loadConversation(this.conversationId);
           this.isdocker = data.data.isdocker || false;
           this.settings = {
             model: data.data.model || '',
@@ -2030,6 +2029,7 @@ let vue_methods = {
               return existingButton;
             });
           }
+          this.loadConversation(this.conversationId);
           this.currentLanguage = data.data.currentLanguage || this.currentLanguage;
           this.mcpServers = data.data.mcpServers || this.mcpServers;
           this.a2aServers = data.data.a2aServers || this.a2aServers;
@@ -2684,7 +2684,18 @@ let vue_methods = {
         const latestUserMessage = [...this.messages].reverse().find(msg => msg.role === 'user');
 
         const getBlock = (type, id = null, name = null) => {
-            if (!currentMsg.displayBlocks) currentMsg.displayBlocks = [];
+            if (!currentMsg.displayBlocks) currentMsg.displayBlocks =[];
+            
+            // 【核心修复】：如果有明确的 ID，先全局查找是否已经有这个块。
+            // 解决大模型穿插输出文字，导致 tool_call/tool_result 块不再是最后一块而被误当成新块的问题。
+            if (id) {
+                const existingBlock = currentMsg.displayBlocks.find(b => b.type === type && b.id === id);
+                if (existingBlock) {
+                    if (name && !existingBlock.name) existingBlock.name = name;
+                    return existingBlock;
+                }
+            }
+
             let last = currentMsg.displayBlocks[currentMsg.displayBlocks.length - 1];
             const canReuse = last && last.type === type && (!id || last.id === id);
             if (canReuse) {
@@ -2991,8 +3002,19 @@ let vue_methods = {
                                     }
                                 }
                             } else {
-                                const bType = tool.type === 'error' ? 'error' : 'tool_result';
-                                getBlock(bType, toolCallId, toolName).content = tool.content;
+                                // 【核心修复】：分离 tool_call 和 tool_result，不要把 call 强行转成 result
+                                let bType = 'tool_result';
+                                if (tool.type === 'error') bType = 'error';
+                                else if (tool.type === 'call') bType = 'tool_call'; // 还原它本身的身份
+
+                                const targetBlock = getBlock(bType, toolCallId, toolName);
+                                
+                                // 根据类型，放入对应的字段中 (call 是放入 args，result 是放入 content)
+                                if (tool.type === 'call') {
+                                    targetBlock.args = tool.content; 
+                                } else {
+                                    targetBlock.content = tool.content;
+                                }
 
                                 if (this.isThinkOpen) { 
                                     currentMsg.content += '</div></div>\n\n'; 
@@ -3002,9 +3024,8 @@ let vue_methods = {
                                 const isCallAlreadyRendered = (tool.type === 'call' && currentMsg.content.includes(`id="${blockId}"`));
 
                                 if (!isCallAlreadyRendered) {
-                                    
-                                  let blockClass = (tool.type === 'error') ? 'type-error' : 'type-result';
-                                  let iconClass = (tool.type === 'error') ? 'fa-xmark' : 'fa-check';
+                                  let blockClass = (tool.type === 'error') ? 'type-error' : (tool.type === 'call' ? 'type-call' : 'type-result');
+                                  let iconClass = (tool.type === 'error') ? 'fa-xmark' : (tool.type === 'call' ? 'fa-wrench' : 'fa-check');
                                   let uiTitle = tool.type === 'call' ? `${this.t('call')} ${tool.title}` : (tool.title || 'Result');
 
                                   let html = `\n<div class="sap-process-block ${blockClass}" id="${blockId}">`;
