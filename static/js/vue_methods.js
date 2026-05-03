@@ -2969,7 +2969,9 @@ let vue_methods = {
                                 this.scrollToBottom();
                             } 
                             else if (tool.type === 'tool_result_stream' && tool.title === "tool_result_stream") {
-                                getBlock('tool_result', toolCallId, toolName).content += tool.content;
+                                // 1. 获取当前块并使用 smartMergeTerminal 更新（解决进度条刷屏）
+                                const targetBlock = getBlock('tool_result', toolCallId, toolName);
+                                targetBlock.content = this.smartMergeTerminal(targetBlock.content, tool.content);
 
                                 const preIdMatch = `id="pre-result-${toolCallId}"`;
                                 let preStartIndex = currentMsg.content.lastIndexOf(preIdMatch);
@@ -2978,19 +2980,22 @@ let vue_methods = {
                                     let nextPreEndIndex = currentMsg.content.indexOf('</pre>', preStartIndex);
                                     if (nextPreEndIndex > -1) {
                                         let readableStreamChunk = tool.content;
-                                        if (typeof readableStreamChunk === 'string') {
-                                            readableStreamChunk = readableStreamChunk.replace(/\\n/g, '\n').replace(/\\"/g, '"');
+                                        // 如果是进度条更新（包含 \r），我们需要重新计算这一块的 HTML
+                                        if (readableStreamChunk.includes('\r')) {
+                                            const displayContent = this.smartMergeTerminal('', targetBlock.content); // 重新拿到合并后的纯文本
+                                            // 替换掉旧的 <pre> 里的内容
+                                            const preContentStart = currentMsg.content.indexOf('>', preStartIndex) + 1;
+                                            currentMsg.content = currentMsg.content.substring(0, preContentStart) + 
+                                                                escapeHtml(displayContent) + 
+                                                                currentMsg.content.substring(nextPreEndIndex);
+                                        } else {
+                                            // 原有的逻辑：普通追加
+                                            if (typeof readableStreamChunk === 'string') {
+                                                readableStreamChunk = readableStreamChunk.replace(/\\n/g, '\n').replace(/\\"/g, '"');
+                                            }
+                                            const contentToAppend = escapeHtml(readableStreamChunk);
+                                            currentMsg.content = currentMsg.content.substring(0, nextPreEndIndex) + contentToAppend + currentMsg.content.substring(nextPreEndIndex);
                                         }
-                                        const contentToAppend = escapeHtml(readableStreamChunk);
-                                        currentMsg.content = currentMsg.content.substring(0, nextPreEndIndex) + contentToAppend + currentMsg.content.substring(nextPreEndIndex);
-                                    }
-                                } else {
-                                    const blockEndTag = '</pre>';
-                                    let lastBlockEndIndex = currentMsg.content.lastIndexOf(blockEndTag);
-                                    if (lastBlockEndIndex > -1) {
-                                        currentMsg.content = currentMsg.content.substring(0, lastBlockEndIndex) + escapeHtml(tool.content) + currentMsg.content.substring(lastBlockEndIndex);
-                                    } else {
-                                        currentMsg.content += ' ' + escapeHtml(tool.content);
                                     }
                                 }
                                 
@@ -3172,6 +3177,15 @@ let vue_methods = {
                     conv.groupId = conv.groupId || this.activeConversationGroupId || this.draftConversationGroupId || 'default';
                 }
             }
+            if (currentMsg && currentMsg.backend_content) {
+                currentMsg.backend_content.forEach(item => {
+                    if (item.role === 'tool' && item.content) {
+                        // 用户在 UI 看到的是全量，但发给 AI 的 content 在这里被永久截断/清理
+                        item.content = this.truncateForAI(item.content);
+                    }
+                });
+            }
+
             this.saveConversations();
 
             if (this.ttsSettings.enabled && audioProcess) {
@@ -3233,6 +3247,26 @@ let vue_methods = {
                 resultText = `User denied the execution of tool '${toolName}'.`;
             } else {
                 resultText = await this.executeToolBackend(toolName, data.tool_params, action);
+
+                // 1. UI 显示：处理 \r 确保显示正常（比如手动执行了带进度条的脚本）
+                if (targetBlock) {
+                    targetBlock.type = action === 'deny' ? 'error' : 'tool_result';
+                    targetBlock.name = action === 'deny' ? this.t('tool_deny') : `${toolName} ${this.t('tool_result')}`;
+                    targetBlock.content = this.smartMergeTerminal('', resultText); 
+                }
+
+                // 2. AI 历史：直接存入清理后的版本
+                const cleanedForAI = this.truncateForAI(resultText);
+
+                if (currentMsg.backend_content) {
+                    for (let i = currentMsg.backend_content.length - 1; i >= 0; i--) {
+                        const item = currentMsg.backend_content[i];
+                        if (item.role === 'tool' && item.tool_call_id === toolCallId) {
+                            item.content = cleanedForAI; // 存入截断版给 AI
+                            break;
+                        }
+                    }
+                } 
             }
 
             // 【修复1】：直接使用缓存的对象修改，不会影响到同 id 的 tool_call 块
@@ -3324,6 +3358,54 @@ let vue_methods = {
         }
     },
     
+
+    // methods 增加此函数
+    smartMergeTerminal(existing, chunk) {
+        if (!chunk) return existing;
+        
+        // 如果 chunk 包含回车符 \r，说明需要覆盖当前行
+        if (chunk.includes('\r')) {
+            let combined = existing + chunk;
+            let lines = combined.split('\n');
+            let lastLine = lines[lines.length - 1];
+
+            // 处理最后一行内部的 \r
+            if (lastLine.includes('\r')) {
+                let subParts = lastLine.split('\r');
+                // 只保留最后一个 \r 之后的内容（即最新的进度）
+                lines[lines.length - 1] = subParts[subParts.length - 1];
+            }
+            return lines.join('\n');
+        }
+        
+        // 如果没有 \r，直接追加
+        return existing + chunk;
+    },
+
+    // 辅助：为 AI 准备的精简函数
+    truncateForAI(text) {
+        if (!text) return '';
+        const MAX_LIMIT = 8000; // 传回 AI 的上限，根据需求调整
+        
+        // 1. 剔除进度条行（包含 █ 或大量进度字符的行对 AI 没用，浪费 Token）
+        let lines = text.split('\n');
+        let cleanedLines = lines.filter(line => {
+            // 过滤掉包含进度条特征的行
+            const isProgressBar = (line.includes('█') || line.includes('░') || (line.includes('%') && line.includes('|')));
+            return !isProgressBar;
+        });
+        
+        let cleanedText = cleanedLines.join('\n').trim();
+        
+        // 2. 如果依然超长，进行头尾截断
+        if (cleanedText.length > MAX_LIMIT) {
+            return cleanedText.substring(0, 2000) + 
+                  `\n\n... [Total ${text.length} chars. Output truncated for context. User sees full output above.] ...\n\n` + 
+                  cleanedText.slice(-4000);
+        }
+        return cleanedText;
+    },
+
     // 辅助：转义 HTML (如果已有可忽略)
     escapeHtml(text) {
         if (!text) return '';
