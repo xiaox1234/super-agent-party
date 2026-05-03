@@ -12345,3 +12345,14 @@ pre.sp-content.sp-code {
     -webkit-overflow-scrolling: touch; /* 保持 iOS 丝滑滚动体验 */
   }
 }
+
+
+.page {
+  height: 100%;
+  overflow-y: auto;            /* 保持可滚动 */
+  scrollbar-width: none;       /* Firefox 隐藏滚动条 */
+  -ms-overflow-style: none;    /* IE/Edge 隐藏滚动条 */
+}
+.page::-webkit-scrollbar {
+  display: none;               /* Chrome/Safari 隐藏滚动条 */
+}
