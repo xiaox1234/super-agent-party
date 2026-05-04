@@ -12356,3 +12356,9 @@ pre.sp-content.sp-code {
 .page::-webkit-scrollbar {
   display: none;               /* Chrome/Safari 隐藏滚动条 */
 }
+
+.chat-area,
+.side-panel {
+  /* 将原本写死的 flex-shrink: 0 改为 1，允许 Flexbox 自动消化超出的那 28px */
+  flex-shrink: 1 !important; 
+}

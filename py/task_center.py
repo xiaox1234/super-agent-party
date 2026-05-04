@@ -141,6 +141,10 @@ class TaskCenter:
             if not task:
                 return False
             
+            if task.status == TaskStatus.CANCELLED and status is not None and status != TaskStatus.CANCELLED:
+                print(f"[TaskCenter] 任务 {task_id} 已被取消，拒绝状态更新为 {status}")
+                return False
+            
             safe_progress = max(0, min(100, progress))
             target_status = status if status else task.status
             

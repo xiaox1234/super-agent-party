@@ -13960,10 +13960,9 @@ collapseSidePanel() {
       const chatArea = this.$refs.chatAreaRef;
       const sidePanel = this.$refs.sidePanelRef;
       
-      if (!chatArea || !sidePanel) {
-        return;
-      }
-      // ✨ 核心修复 1：每次切换状态前，强制清除拖拽留下的内联 px 宽度
+      if (!chatArea || !sidePanel) return;
+      
+      // ✨ 清除之前可能遗留的 px 宽度
       chatArea.style.width = '';
       sidePanel.style.width = '';
       
@@ -13975,6 +13974,9 @@ collapseSidePanel() {
       } else if (this.sidePanelOpen) {
         sidePanel.style.width = '100%';
       }
+      
+      // 🔧 关键修复：强制浏览器重排（读取布局属性）
+      sidePanel.offsetWidth;   // 或者 chatArea.offsetWidth
     });
   },
 
