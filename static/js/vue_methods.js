@@ -3271,6 +3271,16 @@ let vue_methods = {
         }
     },
 
+
+    getVisibleBlocks(msg) {
+        if (!msg.displayBlocks || !msg.displayBlocks.length) return [];
+        const blocks = msg.displayBlocks;
+        // 如果块总数未超过限制，全量渲染
+        if (blocks.length <= MAX_RENDERED_BLOCKS) return blocks;
+        // 否则只渲染最后 MAX_RENDERED_BLOCKS 个（因为新内容在尾部）
+        return blocks.slice(-MAX_RENDERED_BLOCKS);
+    },
+
     // === 辅助函数 ===
 
     // 辅助：调用后端手动执行接口

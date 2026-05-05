@@ -12402,3 +12402,14 @@ pre.sp-content.sp-code {
     font-size: 13px;
     line-height: 1.6;
 }
+
+
+/* 强制思考块内容字号，避免 Markdown 嵌套导致字体缩小 */
+.type-reasoning .sp-content {
+    font-size: 13px !important;          /* 固定字号 */
+    line-height: 1.6;
+}
+
+.type-reasoning .sp-content * {
+    font-size: inherit !important;       /* 所有子元素继承父级字号 */
+}

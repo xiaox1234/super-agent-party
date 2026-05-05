@@ -1262,7 +1262,7 @@ function updateElement(el, rawMarkdown, formatFn) {
                             
                             <!-- === 新架构：基于结构化显示块 (Display Blocks) 的渲染 === -->
                             <div v-else-if="message.displayBlocks && message.displayBlocks.length > 0" class="message-blocks-container">
-                                <template v-for="(block, bIndex) in message.displayBlocks" :key="'blk-'+bIndex">
+                                <template v-for="(block, bIndex) in getVisibleBlocks(message)" :key="'blk-'+bIndex">
                                     
                                     <!-- 如果是最后一个块且消息未完成，或者不是工具类块，正常渲染 -->
                                     <template v-if="(bIndex === message.displayBlocks.length - 1 && !message.generationFinished) || !isToolBlock(block)">
@@ -1346,7 +1346,7 @@ function updateElement(el, rawMarkdown, formatFn) {
 
                       <!-- 操作按钮区 -->
                       <div class="message-actions" v-if="!allBriefly||message.role !== 'system'||index === 0">
-                        <el-tooltip v-if="mainAgent === 'super-model' || message.role !== 'system'" :content="t('edit')" placement="bottom">
+                        <el-tooltip v-if="message.role === 'user'" :content="t('edit')" placement="bottom">
                           <el-button @click="openEditDialog(message.role, message.content,index)" circle size="small"><i class="fa-solid fa-pen-to-square"></i></el-button>
                         </el-tooltip>
                         <el-tooltip v-if="message.role === 'assistant'" :content="t('briefly')" placement="bottom">
@@ -2311,7 +2311,7 @@ function updateElement(el, rawMarkdown, formatFn) {
                                       <i :class="getToolBlockIcon(activeToolBlock.block.type)"></i>
                                       <span>{{ activeToolBlock.block.name || activeToolBlock.block.type }}</span>
                                   </div>
-                                  <pre class="sp-content sp-code" style="max-height: none; white-space: pre-wrap; word-break: break-word;">{{ formatToolBlockContent(activeToolBlock.block) }}</pre>
+                                  <div class="sp-content" v-morph:format="formatToolBlockContent(activeToolBlock.block)"></div>
                               </div>
                           </div>
                           <el-empty v-else :description="t('noBlockSelected')" />
@@ -16959,7 +16959,7 @@ function updateElement(el, rawMarkdown, formatFn) {
                           
                           <!-- === 新架构：基于结构化显示块 (Display Blocks) 的渲染 === -->
                             <div v-else-if="message.displayBlocks && message.displayBlocks.length > 0" class="message-blocks-container">
-                                <template v-for="(block, bIndex) in message.displayBlocks" :key="'blk-'+bIndex">
+                                <template v-for="(block, bIndex) in getVisibleBlocks(message)" :key="'blk-'+bIndex">
                                     
                                     <!-- 如果是最后一个块且消息未完成，或者不是工具类块，正常渲染 -->
                                     <template v-if="(bIndex === message.displayBlocks.length - 1 && !message.generationFinished) || !isToolBlock(block)">
@@ -17043,7 +17043,7 @@ function updateElement(el, rawMarkdown, formatFn) {
 
                     <!-- 操作按钮区 -->
                     <div class="message-actions" v-if="!allBriefly||message.role !== 'system'||index === 0">
-                      <el-tooltip v-if="mainAgent === 'super-model' || message.role !== 'system'" :content="t('edit')" placement="bottom">
+                      <el-tooltip v-if="message.role === 'user'" :content="t('edit')" placement="bottom">
                         <el-button @click="openEditDialog(message.role, message.content,index)" circle size="small"><i class="fa-solid fa-pen-to-square"></i></el-button>
                       </el-tooltip>
                       <el-tooltip v-if="message.role === 'assistant'" :content="t('briefly')" placement="bottom">

@@ -1084,7 +1084,7 @@ function updateElement(el, rawMarkdown, formatFn) {
                             
                             <!-- === 新架构：基于结构化显示块 (Display Blocks) 的渲染 === -->
                             <div v-else-if="message.displayBlocks && message.displayBlocks.length > 0" class="message-blocks-container">
-                                <template v-for="(block, bIndex) in message.displayBlocks" :key="'blk-'+bIndex">
+                                <template v-for="(block, bIndex) in getVisibleBlocks(message)" :key="'blk-'+bIndex">
                                     
                                   <!-- 1. 深度思考块 (Reasoning) -->
                                   <div v-if="block.type === 'reasoning'" class="sap-process-block type-reasoning">
@@ -1163,7 +1163,7 @@ function updateElement(el, rawMarkdown, formatFn) {
 
                       <!-- 操作按钮区 -->
                       <div class="message-actions" v-if="!allBriefly||message.role !== 'system'||index === 0">
-                        <el-tooltip v-if="mainAgent === 'super-model' || message.role !== 'system'" :content="t('edit')" placement="bottom">
+                        <el-tooltip v-if="message.role === 'user'" :content="t('edit')" placement="bottom">
                           <el-button @click="openEditDialog(message.role, message.content,index)" circle size="small"><i class="fa-solid fa-pen-to-square"></i></el-button>
                         </el-tooltip>
                         <el-tooltip v-if="message.role === 'assistant'" :content="t('briefly')" placement="bottom">
