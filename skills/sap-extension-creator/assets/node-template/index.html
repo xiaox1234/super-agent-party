@@ -245,9 +245,9 @@ function updateDarkIcon() {
 function getExtId() {
   try {
     const match = window.location.pathname.match(/\/extensions\/([^\/]+)/);
-    if (match) { MY_EXT_ID = match[1]; return MY_EXT_ID; }
-    return 'unknown';
-  } catch(e) { return 'unknown'; }
+    MY_EXT_ID = match ? match[1] : 'unknown';
+  } catch(e) { MY_EXT_ID = 'unknown'; }
+  return MY_EXT_ID;
 }
 
 /* ================================================================
@@ -295,6 +295,8 @@ async function handleMcpCall(data) {
 }
 
 /* ---- WebSocket ---- */
+let _closing = false;
+
 function initWS() {
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
   ws = new WebSocket(`${proto}//${location.host}/ws`);
@@ -302,7 +304,10 @@ function initWS() {
     ws.send(JSON.stringify({ type: 'get_messages' }));
     registerMcpTools();   // ← MCP: register tools on startup
   };
-  ws.onclose = () => setTimeout(initWS, 5000);
+  ws.onclose = () => {
+    // If the page is being closed (_closing=true), do NOT reconnect
+    if (!_closing) setTimeout(initWS, 5000);
+  };
   ws.onmessage = e => {
     try {
       const d = JSON.parse(e.data);
@@ -381,7 +386,11 @@ function send() {
 function clear() {
   ws.send(JSON.stringify({ type: 'trigger_clear_message' }));
 }
-function closeWindow() { window.close(); }
+function closeWindow() {
+  _closing = true;
+  unregisterMcpTools();
+  window.close();
+}
 
 /* ---- Compact Mode ---- */
 function checkCompactMode() {
@@ -409,6 +418,7 @@ clearBtn.addEventListener('click', clear);
 function autoHeight() { input.style.height = 'auto'; input.style.height = input.scrollHeight + 'px'; }
 
 window.addEventListener('beforeunload', () => {
+  _closing = true;
   unregisterMcpTools();   // ← MCP: unregister tools on shutdown
 });
 
