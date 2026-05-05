@@ -1514,52 +1514,53 @@ async def search_files_tool_local(pattern: str, path: str = ".") -> str:
         return "\n".join(matches) if matches else "No matches found."
     except Exception as e:
         return f"[Error] Search failed: {str(e)}"
-    
+
+
 async def glob_files_tool_local(pattern: str, exclude: str = "") -> str:
-    """[Local] 智能查找：修复了拦截 '..' 的过度限制"""
+    """[Local] 智能查找：使用 pathlib.glob 支持 ** 递归，兼容 Windows"""
     try:
         cwd = await _get_current_cwd()
         base = Path(cwd).resolve()
-        
-        # 移除原有的 if '..' in pattern 拦截逻辑
-        # 依靠后续的 Path(root).relative_to(base) 来确保安全
 
         excludes = [e.strip() for e in exclude.split(",") if e.strip()]
         DEFAULT_EXCLUDES = {'.git', 'node_modules', '__pycache__', 'venv', 'dist', 'build'}
-        
+
+        # 使用 pathlib 的 glob，天然支持 ** 递归，并且与系统分隔符无关
+        matched_paths = list(base.glob(pattern))
+
         results = []
+        for p in matched_paths:
+            if not p.is_file():
+                continue
 
-        # 1. 尝试使用 git ls-files (略过，逻辑同原版)
-        # ... (中间 git 逻辑保持不变) ...
-
-        # 2. 优化的遍历逻辑
-        for root, dirs, files in os.walk(str(base), topdown=True):
-            # 剪枝
-            dirs[:] = [d for d in dirs if d not in DEFAULT_EXCLUDES and not d.startswith('.')]
-            
+            # 计算相对路径，用于后续匹配和输出
             try:
-                # 核心安全检查：确保当前遍历到的 root 仍在 base 内部
-                rel_root = Path(root).relative_to(base)
+                rel = p.relative_to(base)
             except ValueError:
-                continue # 如果越界了，跳过该目录
+                # 如果路径不在 base 内（理论上不会发生），跳过
+                continue
 
-            for name in files:
-                file_rel_path = str(rel_root / name)
-                if file_rel_path.startswith("./"): file_rel_path = file_rel_path[2:]
+            rel_str = rel.as_posix()  # 统一使用正斜杠，跨平台一致
 
-                if any(fnmatch.fnmatch(file_rel_path, ex) for ex in excludes):
-                    continue
-                
-                # 检查匹配项
-                if fnmatch.fnmatch(file_rel_path, pattern):
-                    results.append(file_rel_path)
+            # 排除命中 exclude 参数中的模式
+            if any(fnmatch.fnmatch(rel_str, ex) for ex in excludes):
+                continue
 
-        limit = 200
+            # 排除默认隐藏/构建目录（检查路径中的每一级目录）
+            parts = rel.parts
+            if any(part in DEFAULT_EXCLUDES or part.startswith('.') for part in parts):
+                continue
+
+            results.append(rel_str)
+
         output = sorted(results)
+        limit = 200
+        if not output:
+            return "No files matched."
         if len(output) > limit:
             return "\n".join(output[:limit]) + f"\n... ({len(output)-limit} more files)"
-        return "\n".join(output) if output else "No files matched."
-        
+        return "\n".join(output)
+
     except Exception as e:
         return f"[Error] Glob failed: {str(e)}"
 

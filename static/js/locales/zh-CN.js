@@ -1685,4 +1685,5 @@ key3`,
         'dangerous_path_detected': '检测到工作区为系统敏感目录，出于安全考虑禁止配置为工作区路径',
         'fullScreen': '全屏',
         'selectRegion': '选择区域',
+        'toolDetail': '工具详情',
     }

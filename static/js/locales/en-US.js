@@ -1682,4 +1682,5 @@ Key3`,
         'dangerous_path_detected': 'Detected that the workspace is a system-sensitive directory. For security reasons, it is forbidden to configure it as the workspace path.',
         'fullScreen': 'Full Screen',
         'selectRegion': 'Select Region',
+        'toolDetail': 'Tool Detail',
     }

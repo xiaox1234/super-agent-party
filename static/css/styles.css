@@ -12362,3 +12362,43 @@ pre.sp-content.sp-code {
   /* 将原本写死的 flex-shrink: 0 改为 1，允许 Flexbox 自动消化超出的那 28px */
   flex-shrink: 1 !important; 
 }
+
+
+/* 折叠的工具块：去掉内容，标题可点击，保持原块样式 */
+.sap-process-block.collapsed-tool-block {
+    cursor: pointer;
+    transition: all 0.2s ease;
+    padding: 0; /* 去除内边距，只靠 sp-header 撑起 */
+}
+.sap-process-block.collapsed-tool-block > .sp-header {
+    padding: 8px 12px;
+    user-select: none;
+}
+.sap-process-block.collapsed-tool-block:hover {
+    border-color: var(--el-color-primary-light-5);
+}
+
+/* 确保侧边栏内的卡片有良好的显示 */
+.tool-detail-view .extension-card {
+    background-color: var(--el-bg-color) !important;
+    border: 1px solid var(--el-border-color-lighter) !important;
+    border-radius: 12px !important;
+}
+
+
+/* 侧边栏工具详情容器 */
+.tool-detail-view {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+
+.tool-detail-view .sap-process-block {
+    box-shadow: none !important; /* 去掉可能的多余阴影 */
+    background: var(--el-bg-color) !important;
+}
+
+.tool-detail-view .sp-content {
+    font-size: 13px;
+    line-height: 1.6;
+}
