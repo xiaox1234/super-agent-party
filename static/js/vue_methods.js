@@ -287,7 +287,7 @@ let vue_methods = {
       this.stopGenerate();
       await this.sendMessage();
     }else{
-      this.messages[this.editIndex].content = this.editContent; // 更新this.editIndex对应的消息内容
+      // this.messages[this.editIndex].pure_content = this.editContent; // 更新this.editIndex对应的消息内容
     }
     await this.autoSaveSettings();
   },

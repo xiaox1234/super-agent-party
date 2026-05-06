@@ -1029,7 +1029,7 @@ async def call_node_extension_tool(ext_id: str, tool_name: str, tool_params: dic
         if call_id in mcp_call_results:
             del mcp_call_results[call_id]
 
-async def dispatch_tool(tool_name: str, tool_params: dict, settings: dict) -> str | List | AsyncIterator[str] | None :
+async def dispatch_tool(tool_name: str, tool_params: dict, settings: dict,is_sub_agent:bool=False) -> str | List | AsyncIterator[str] | None :
     global mcp_client_list,_TOOL_HOOKS,HA_client,ChromeMCP_client,sql_client, node_ext_mcp_clients, node_ext_mcp_tools
     print("dispatch_tool",tool_name,tool_params)
     
@@ -1322,6 +1322,11 @@ async def dispatch_tool(tool_name: str, tool_params: dict, settings: dict) -> st
                 is_allowed = True
                 print(f"[Permission] Tool '{tool_name}' allowed by project config.")
 
+
+        # --- 规则 E: 如果是子智能体，且不被允许，直接返回拒绝 ---
+        if not is_allowed and is_sub_agent:
+            return "permission_denied"
+        
         # --- 最终判定 ---
         if not is_allowed:
             # 返回前端特定的 JSON 结构，触发审批 UI
@@ -4543,7 +4548,7 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                                 }
                             results = f"{response_content.name}tool has been successfully launched. It will take some time to run, and the results will be provided in the next round of conversation." # 保持原样
                         else:
-                            results = await dispatch_tool(response_content.name, first_arg, settings)
+                            results = await dispatch_tool(response_content.name, first_arg, settings,request.is_sub_agent)
 
                         if results is None:
                             # 保持原样，但建议加上 ID
