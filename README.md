@@ -61,7 +61,7 @@
 #### AI Browser: Equips your AI agents with their own browser, supporting automatic control
 ![image](doc/image/img-2/browser.jpeg)
 
-#### Extension System: Supports installing extensions and creating new ones. The image below shows a galgame extension. All extensions can be opened either in an independent window or in a sidebar.
+#### Extension System: Supports installing extensions and creating new ones. The image below shows a galgame extension. All extensions can be opened either in an independent window or in a sidebar.You can even use the agent skill [sap-extension-creator](skills/sap-extension-creator) to create new SAP extensions, achieving the bootstrapping of the agent party!
 ![image](doc/image/img-2/ext.jpeg)
 
 #### Developer-Friendly: Offers open OpenAI API interfaces and MCP interfaces, allowing agents to be externally connected

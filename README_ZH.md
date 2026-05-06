@@ -60,7 +60,7 @@
 #### AI浏览器：让你的AI智能体拥有自己的浏览器，支持自动控制
 ![image](doc/image/img-1/browser.jpeg)
 
-#### 扩展系统：支持安装扩展，和自己创造新的扩展，下图为galgame扩展，扩展均支持独立窗口或者侧边栏两种方式打开
+#### 扩展系统：支持安装扩展，和自己创造新的扩展，下图为galgame扩展，扩展均支持独立窗口或者侧边栏两种方式打开。你甚至可以使用[sap-extension-creator](skills/sap-extension-creator)这个agent skill来创造新的sap扩展，实现agent party的自举！
 ![image](doc/image/img-1/ext.jpeg)
 
 #### 开发者友好：开放openai API接口、MCP接口，可以将智能体对外转接
