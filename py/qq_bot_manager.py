@@ -96,7 +96,7 @@ class QQBotManager:
             self.bot_client = MyClient(intents=botpy.Intents(public_messages=True),is_sandbox=config.is_sandbox)
             self.bot_client.QQAgent = config.QQAgent
             self.bot_client.memoryLimit = config.memoryLimit
-            self.bot_client.separators = config.separators if config.separators else ['。', '\n', '？', '！']
+            self.bot_client.separators = config.separators if config.separators else []
             self.bot_client.reasoningVisible = config.reasoningVisible
             self.bot_client.quickRestart = config.quickRestart
             
