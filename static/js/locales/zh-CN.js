@@ -505,7 +505,7 @@ window.lang_zhCN = {
         'autoUpdateSetting': '长期记忆',
         'enableInfer': '是否自主决定记住哪些内容',
         'autoUpdateNote': '长期记忆：会跟随对话内容，动态更新一个记忆库。对话时，会根据用户的提问，将相关的记忆返回给智能体。',
-        'quickRestartEnable': '启用`/重启`快捷指令',
+        'quickRestartEnable': '启用快捷指令（`/重启`命令清空对话，`/停止`命令停止对话）',
         'bot_config': '机器人通用配置',
         'imgHost': '图床/文件床',
         'imgHostType': '图床/文件床类型',

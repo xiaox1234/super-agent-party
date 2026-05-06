@@ -504,7 +504,7 @@ window.lang_enUS = {
         'autoUpdateSetting': 'Long-term memory',
         'enableInfer': 'Whether to autonomously decide what to remember',
         'autoUpdateNote': 'Long-term memory: It will dynamically update a memory database according to the content of the conversation. During the conversation, it will return relevant memories to the intelligent entity based on the user questions.',
-        'quickRestartEnable': 'Enable/Restart shortcut command',
+        'quickRestartEnable': 'Enable quick commands (`/restart` command clears conversation, `/stop` command stops conversation)',
         'bot_config': 'Bot General Config',
         'imgHost': 'Image Host / Flie Host',
         'imgHostType': 'Image Host / Flie Host Type',

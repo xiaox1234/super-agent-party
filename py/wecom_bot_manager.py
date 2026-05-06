@@ -3,7 +3,7 @@ import asyncio
 import json
 import random
 import threading
-from typing import Optional, List
+from typing import Optional, List, Dict
 import weakref
 import aiohttp
 import io
@@ -27,7 +27,7 @@ class WeComBotConfig(BaseModel):
     reasoningVisible: bool    # 是否显示推理过程
     quickRestart: bool        # 快速重启指令开关
     enableTTS: bool           # 是否启用TTS
-    wakeWord: str             # 唤醒词
+    wakeWord: str              # 唤醒词
     behaviorSettings: Optional[BehaviorSettings] = None
     behaviorTargetChatIds: List[str] = Field(default_factory=list)
 
@@ -138,9 +138,13 @@ class WeComBotManager:
 
     def _cleanup(self):
         self.is_running = False
-        if self.bot_client and self.bot_client.ws_client:
-            try: self.bot_client.ws_client.disconnect()
-            except: pass
+        if self.bot_client:
+            # 取消所有正在进行的任务
+            for task in self.bot_client.active_tasks.values():
+                task.cancel()
+            if self.bot_client.ws_client:
+                try: self.bot_client.ws_client.disconnect()
+                except: pass
         if self.loop and not self.loop.is_closed():
             try: self.loop.close()
             except: pass
@@ -180,6 +184,8 @@ class WeComClient:
         self.ws_client: WSClient = None
         self._manager_ref = None
         self.wakeWord = None
+        # 核心：追踪每个 chat_id 正在运行的任务
+        self.active_tasks: Dict[str, asyncio.Task] = {}
         
         global_behavior_engine.register_handler("wecom", self.execute_behavior_event)
 
@@ -192,33 +198,67 @@ class WeComClient:
         async def on_voice(frame): await self.handle_message(frame, "voice")
 
     async def handle_message(self, frame, msg_type) -> None:
+        """接收并调度消息处理任务（包含打断与指令逻辑）"""
         body = frame.get('body', {})
         chat_id = body.get('chatid', body.get('from', {}).get('userid', ''))
         global_behavior_engine.report_activity("wecom", chat_id)
         
+        # 1. 快捷指令与打断检查
+        if self.quickRestart and msg_type == "text":
+            user_text = body.get('text', {}).get('content', '').strip()
+            # 停止逻辑
+            if user_text in ["/停止", "/stop"]:
+                if chat_id in self.active_tasks:
+                    self.active_tasks[chat_id].cancel()
+                    await self.ws_client.reply_stream(frame, generate_req_id('stream'), "已停止当前输出。", True)
+                return
+            # 重启逻辑
+            if user_text in ["/重启", "/restart"]:
+                if chat_id in self.active_tasks:
+                    self.active_tasks[chat_id].cancel()
+                self.memoryList[chat_id] = []
+                await self.ws_client.reply_stream(frame, generate_req_id('stream'), "对话记录已重置。", True)
+                return
+
+        # 2. 如果当前有正在处理的任务，则打断它
+        if chat_id in self.active_tasks:
+            logging.info(f"[WeCom] 检测到新消息，正在打断会话 {chat_id} 的旧任务")
+            self.active_tasks[chat_id].cancel()
+
+        # 3. 创建新任务并记录
+        current_task = asyncio.create_task(self._do_handle_message(frame, msg_type, chat_id))
+        self.active_tasks[chat_id] = current_task
+        
+        try:
+            await current_task
+        except asyncio.CancelledError:
+            logging.info(f"[WeCom] 会话 {chat_id} 的任务已被打断/取消")
+        finally:
+            if self.active_tasks.get(chat_id) == current_task:
+                self.active_tasks.pop(chat_id, None)
+
+    async def _do_handle_message(self, frame, msg_type, chat_id) -> None:
+        """实际的 AI 处理逻辑，包含多模态解析与流式响应"""
+        body = frame.get('body', {})
         client = AsyncOpenAI(api_key="sk", base_url=f"http://127.0.0.1:{self.port}/v1")
+        
         if chat_id not in self.memoryList: self.memoryList[chat_id] = []
         
         user_text = ""
         user_content = []
         has_image = False
         
-        # 1. 解析多种消息类型
+        # --- 解析逻辑保持不变 ---
         if msg_type == "text":
             user_text = body.get('text', {}).get('content', '')
             if "/id" in user_text.lower():
                 await self.ws_client.reply_stream(frame, generate_req_id('stream'), f"ID: `{chat_id}`", True)
-                return
-            if self.quickRestart and ("/重启" in user_text or "/restart" in user_text):
-                self.memoryList[chat_id] = []
-                await self.ws_client.reply_stream(frame, generate_req_id('stream'), "对话已重置。", True)
                 return
             if self.wakeWord and self.wakeWord not in user_text: return
 
         elif msg_type == "image":
             image = body.get('image', {})
             if image.get('url'):
-                # 企业微信图片需要 AES 解密，SDK 内置了 download_file 处理此逻辑
                 buffer, _ = await self.ws_client.download_file(image.get('url'), image.get('aeskey'))
                 base64_data = base64.b64encode(buffer).decode("utf-8")
                 has_image = True
@@ -227,9 +267,7 @@ class WeComClient:
         elif msg_type == "voice":
             voice = body.get('voice', {})
             if voice.get('url'):
-                # 语音也需要解密下载
                 buffer, _ = await self.ws_client.download_file(voice.get('url'), voice.get('aeskey'))
-                # 调用本地 ASR 接口
                 transcribed = await self._transcribe_audio(buffer)
                 if transcribed:
                     user_text = transcribed
@@ -238,7 +276,7 @@ class WeComClient:
                     await self.ws_client.reply_stream(frame, generate_req_id('stream'), "语音识别失败", True)
                     return
 
-        # 2. 构造 OpenAI 多模态消息
+        # 构造 OpenAI 格式
         if has_image:
             if user_text: user_content.append({"type": "text", "text": user_text})
             self.memoryList[chat_id].append({"role": "user", "content": user_content})
@@ -246,7 +284,7 @@ class WeComClient:
             if user_text: self.memoryList[chat_id].append({"role": "user", "content": user_text})
             else: return
 
-        # 3. LLM 响应与流式回传
+        # LLM 响应
         stream_id = generate_req_id('stream')
         full_response_text = ""
         try:
@@ -254,35 +292,41 @@ class WeComClient:
                 model=self.WeComAgent,
                 messages=self.memoryList[chat_id],
                 stream=True,
-                extra_body={
-                    "is_app_bot": True,
-                    "platform": "wecom",
-                }
+                extra_body={"is_app_bot": True, "platform": "wecom"}
             )
             async for chunk in stream:
                 delta = chunk.choices[0].delta
                 content = delta.content or ""
                 reasoning = getattr(delta, "reasoning_content", "") or ""
-                full_response_text += (reasoning if self.reasoningVisible and reasoning else content)
                 
-                if content:
-                    # 控制发送频率，避免企微接口限流
+                display_content = (reasoning if self.reasoningVisible and reasoning else content)
+                full_response_text += display_content
+                
+                if display_content:
+                    # 企微 SDK 负责流式分段发送
                     await self.ws_client.reply_stream(frame, stream_id, full_response_text, False)
             
+            # 发送最后一段
             await self.ws_client.reply_stream(frame, stream_id, full_response_text, True)
             self.memoryList[chat_id].append({"role": "assistant", "content": full_response_text})
             
-            # # 4. 如果开启了 TTS，异步发送语音气泡
-            # config = self._manager_ref().config if self._manager_ref else None
-            # if config and config.enableTTS:
+            # 记忆长度限制
+            if self.memoryLimit > 0:
+                while len(self.memoryList[chat_id]) > self.memoryLimit:
+                    self.memoryList[chat_id].pop(0)
+
+            # TTS 语音逻辑可以在此通过异步任务触发 (保持现状)
+            # manager = self._manager_ref()
+            # if manager and manager.config.enableTTS:
             #     asyncio.create_task(self._send_voice(chat_id, full_response_text))
                 
         except Exception as e:
-            logging.error(f"回复异常: {e}")
-            await self.ws_client.reply_stream(frame, stream_id, f"机器人异常: {e}", True)
+            if not isinstance(e, asyncio.CancelledError):
+                logging.error(f"企微回复异常: {e}")
+                await self.ws_client.reply_stream(frame, stream_id, f"机器人异常: {e}", True)
 
     async def execute_behavior_event(self, chat_id: str, behavior_item: BehaviorItem):
-        """行为引擎触发主动发送"""
+        """行为引擎触发主动推送 (保持原有非流式逻辑)"""
         logging.info(f"[WeComClient] 行为触发 -> {chat_id}")
         prompt = behavior_item.action.prompt
         if behavior_item.action.type == "random":
@@ -296,11 +340,7 @@ class WeComClient:
             client = AsyncOpenAI(api_key="sk", base_url=f"http://127.0.0.1:{self.port}/v1")
             response = await client.chat.completions.create(
                 model=self.WeComAgent, messages=messages, stream=False, 
-                extra_body={
-                    "is_app_bot": True,
-                    "platform": "wecom",
-                    "behavior_trigger": True
-                }
+                extra_body={"is_app_bot": True, "platform": "wecom", "behavior_trigger": True}
             )
             reply = response.choices[0].message.content
             if reply:
@@ -309,18 +349,13 @@ class WeComClient:
                     'markdown': {'content': reply}
                 })
                 self.memoryList[chat_id].append({"role": "assistant", "content": reply})
-                
-                # config = self._manager_ref().config if self._manager_ref else None
-                # TTS备用，暂时未启用
-                # if config and config.enableTTS:
-                #     asyncio.create_task(self._send_voice(chat_id, reply))
         except Exception as e:
-            logging.error(f"主动推送失败: {e}")
+            logging.error(f"企微主动推送失败: {e}")
 
     # ------------------ 工具方法 ------------------
 
     async def _transcribe_audio(self, audio_data: bytes) -> str:
-        """调用本地 ASR 处理收到的音频"""
+        """ASR识别 (原有逻辑)"""
         try:
             form = aiohttp.FormData()
             form.add_field('audio', io.BytesIO(audio_data), filename="voice.amr", content_type='audio/amr')
@@ -333,41 +368,24 @@ class WeComClient:
         except: return ""
 
     async def _send_voice(self, chat_id: str, text: str):
+        """发送语音气泡 (原有逻辑)"""
         try:
-            # 【深度修复 Key 获取】
-            # 尝试从多个渠道获取 bot_id，确保不为空
             manager = self._manager_ref()
-            bot_key = None
-            if manager and manager.config:
-                bot_key = manager.config.bot_id
-            
-            # 如果还是没有，尝试从 settings 紧急加载
-            if not bot_key:
-                try:
-                    settings = await load_settings()
-                    bot_key = settings.get("weComBotConfig", {}).get("bot_id")
-                except: pass
+            bot_key = manager.config.bot_id if manager and manager.config else None
+            if not bot_key: return
 
-            if not bot_key:
-                logging.error("[WeComClient] 关键错误：未找到企微 bot_id，无法发送语音")
-                return
-
-            # 1. 清理文本
             clean_text = re.sub(r'[*_#`~>]', '', text)
             if not clean_text.strip(): return
             
             async with aiohttp.ClientSession() as session:
-                # 2. 请求 MP3
                 payload = {"text": clean_text, "voice": "default", "format": "mp3"} 
                 async with session.post(f"http://127.0.0.1:{self.port}/tts", json=payload) as r:
                     if r.status != 200: return
                     mp3_data = await r.read()
 
-                # 3. 转码
                 amr_data = await asyncio.to_thread(convert_to_amr_simple, mp3_data)
                 if not amr_data: return
 
-                # 4. 上传
                 upload_url = f"https://qyapi.weixin.qq.com/cgi-bin/webhook/upload_media?key={bot_key}&type=voice"
                 form = aiohttp.FormData()
                 form.add_field('media', amr_data, filename='voice.amr', content_type='audio/amr')
@@ -375,21 +393,13 @@ class WeComClient:
                 async with session.post(upload_url, data=form) as up_resp:
                     up_data = await up_resp.json()
                     media_id = up_data.get("media_id")
-                    if not media_id:
-                        logging.error(f"企微素材上传失败。Key: {bot_key}, 响应: {up_data}")
-                        return
                 
-                # 5. 发送
-                send_url = f"https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key={bot_key}"
-                async with session.post(send_url, json={
-                    "msgtype": "voice",
-                    "voice": {"media_id": media_id}
-                }) as send_resp:
-                    res = await send_resp.json()
-                    if res.get("errcode") == 0:
-                        logging.info(f"成功向 {chat_id} 发送语音气泡")
-                    else:
-                        logging.error(f"企微语音发送失败: {res}")
-                        
-        except Exception as e:
-            logging.error(f"企微 TTS 流程异常: {e}")
+                if media_id:
+                    send_url = f"https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key={bot_key}"
+                    await session.post(send_url, json={"msgtype": "voice", "voice": {"media_id": media_id}})
+        except: pass
+
+    def __del__(self):
+        try:
+            for task in self.active_tasks.values(): task.cancel()
+        except: pass
