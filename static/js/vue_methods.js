@@ -1881,7 +1881,6 @@ let vue_methods = {
           this.memories = data.data.memories || this.memories;
           this.memorySettings = data.data.memorySettings || this.memorySettings;
           this.text2imgSettings = data.data.text2imgSettings || this.text2imgSettings;
-          this.asrSettings = data.data.asrSettings || this.asrSettings;
           this.ttsSettings = data.data.ttsSettings || this.ttsSettings;
           this.behaviorSettings = data.data.behaviorSettings || this.behaviorSettings;
           this.VRMConfig = data.data.VRMConfig || this.VRMConfig;
