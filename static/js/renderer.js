@@ -655,7 +655,7 @@ handleAction(item, extraValue) {
 };
 
 const MAX_DISPLAY_LENGTH = 50000;   // 工具结果/错误信息前端显示截断长度
-const MAX_RENDERED_BLOCKS = 30;
+const MAX_RENDERED_BLOCKS = 10;
 // ==========================================
 // 2. 创建 Vue 应用
 // ==========================================

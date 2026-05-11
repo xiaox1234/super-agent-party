@@ -2746,6 +2746,15 @@ let vue_methods = {
 
                         // B. 处理文本 (Content) —— 流式防抖更新
                         if (delta.content) {
+
+                            if (!this._streamTextBuffer) {
+                                const blocks = currentMsg.displayBlocks;
+                                const lastBlock = blocks && blocks.length > 0 ? blocks[blocks.length - 1] : null;
+                                if (lastBlock && lastBlock.type !== 'text') {
+                                    this._streamTextBuffer += '\n\n';
+                                }
+                            }
+
                             // 缓冲文本，不再直接操作 DOM
                             this._streamTextBuffer += delta.content;
 
