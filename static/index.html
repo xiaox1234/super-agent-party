@@ -1837,7 +1837,7 @@ function updateElement(el, rawMarkdown, formatFn) {
                       </el-tooltip>
 
                       <!-- 折叠态：仅当"自动折叠输入框"开关打开且当前未聚焦时，把模型 / 视图 pill 收纳到发送按钮左侧 -->
-                      <template v-if="systemSettings.autoCollapseInput && !isChatInputActive && !isCapsuleMode">
+                      <template v-if="systemSettings.autoCollapseInput && !isChatInputActive && !isCapsuleMode && !isAssistantMode && !isMobile">
                         <el-tooltip :content="t('clickToSwitchModel')" placement="top" :show-after="500">
                           <div class="status-pill compact-status-pill" @click.stop="showModelDialog = true">
                             <i class="fa-solid fa-microchip"></i>
@@ -1922,7 +1922,7 @@ function updateElement(el, rawMarkdown, formatFn) {
                         v-show="!isPttMode"
                         v-model="userInput"
                         type="textarea"
-                        :rows="(systemSettings.autoCollapseInput && !isChatInputActive) ? 1 : (isMobile ? (isInputExpanded ? 8 : 3) : (isInputExpanded ? 16 : 4))"
+                        :rows="(systemSettings.autoCollapseInput && !isChatInputActive  && !isAssistantMode && !isMobile) ? 1 : (isMobile ? (isInputExpanded ? 8 : 3) : (isInputExpanded ? 16 : 4))"
                         :placeholder="t('inputMessage')"
                         resize="none"
                         @focus="onChatInputFocus"
@@ -1958,7 +1958,7 @@ function updateElement(el, rawMarkdown, formatFn) {
                           </div>
                         </div>
 
-                      <div class="input-status-bar" v-show="!systemSettings.autoCollapseInput || isChatInputActive">
+                      <div class="input-status-bar" v-show="!systemSettings.autoCollapseInput || isChatInputActive || isAssistantMode || isMobile">
                         
                         <!-- ✨ 2. 语音/键盘切换按钮：始终显示（或者你可以加 v-if="isMobile" 只让手机显示） -->
                         <div class="voice-toggle-btn" @click="isPttMode = !isPttMode" v-if="isMobile">
