@@ -530,6 +530,74 @@ async def _exec_docker_cmd_simple(cwd: str, cmd_list: list) -> str:
         raise Exception(f"Command failed: {stderr.decode().strip()}")
     return stdout.decode()
 
+# ==================== 敏感信息脱敏工具 ====================
+
+def _is_env_file(file_path: str) -> bool:
+    """判断文件是否为环境变量文件（基于文件名）"""
+    if not file_path:
+        return False
+    name = os.path.basename(file_path)
+    return (
+        name.startswith('.env') or 
+        name.startswith('env.') or 
+        name in ['.env', 'env', 'environment']
+    )
+
+def _mask_sensitive_value(value: str) -> str:
+    """脱敏值：将值替换为掩码，只显示首尾部分"""
+    v = value.strip()
+    if len(v) <= 4:
+        return '*' * len(v)
+    elif len(v) <= 8:
+        return v[0] + '*' * (len(v) - 2) + v[-1]
+    else:
+        return v[:3] + '*' * (len(v) - 6) + v[-3:]
+
+def _mask_env_content(text: str) -> str:
+    """对包含 KEY=VALUE 的行进行脱敏，VALUE 部分替换为掩码"""
+    pattern = re.compile(
+        r'^(\s*(?:export\s+)?[A-Za-z_][A-Za-z0-9_]*\s*=\s*)(\S+)(.*)$',
+        re.IGNORECASE
+    )
+    masked_lines = []
+    for line in text.splitlines():
+        match = pattern.match(line)
+        if match:
+            prefix = match.group(1)
+            value = match.group(2)
+            suffix = match.group(3) or ''
+            masked_value = _mask_sensitive_value(value)
+            new_line = f"{prefix}{masked_value}{suffix}"
+            masked_lines.append(new_line)
+        else:
+            masked_lines.append(line)
+    return "\n".join(masked_lines)
+
+def _maybe_mask_output(file_path: str, output: str) -> str:
+    """
+    根据文件路径决定是否脱敏输出。
+    用于 read_file、read_file_range、tail_file 等工具。
+    输出可能包含行号前缀，例如 "   42 | CONTENT"。
+    """
+    if not _is_env_file(file_path):
+        return output
+
+    masked = []
+    for line in output.splitlines():
+        # 如果包含管道符，可能是带行号的输出
+        if '|' in line:
+            parts = line.split('|', 1)
+            if len(parts) == 2:
+                line_no = parts[0].strip()
+                content = parts[1]
+                masked_line = f"{line_no} | {_mask_env_content(content)}"
+            else:
+                masked_line = _mask_env_content(line)
+        else:
+            masked_line = _mask_env_content(line)
+        masked.append(masked_line)
+    return "\n".join(masked)
+
 # ==================== Docker 环境工具实现 (含新功能) ====================
 
 async def docker_sandbox(command: str, background: bool = False, timeout: int = 600) -> AsyncIterator[str]:
@@ -877,7 +945,9 @@ async def read_file_tool(path: str, start_line: int = None, end_line: int = None
             echo "💡 [Next Step Hint] The file is large. Use 'read_file_range' to read specific lines (e.g., 1001-2000) or 'tail_file' for the end."
         fi
         """
-        return await _exec_docker_cmd_simple(real_cwd, ["sh", "-c", script])
+        raw_output = await _exec_docker_cmd_simple(real_cwd, ["sh", "-c", script])
+        # 脱敏处理
+        return _maybe_mask_output(path, raw_output)
     except Exception as e: 
         return f"[Error] Read failed: {str(e)}"
 
@@ -906,8 +976,9 @@ async def read_file_range_tool(path: str, start_line: int, end_line: int) -> str
         
         # 兜底：防止 Docker 返回的结果依然由于行数过多导致爆炸
         if len(result) > 50000:
-            return result[:50000] + "\n... [Warning] Output truncated by tool safety limit."
-        return result
+            result = result[:50000] + "\n... [Warning] Output truncated by tool safety limit."
+        # 脱敏处理
+        return _maybe_mask_output(path, result)
     except Exception as e: 
         return str(e)
 
@@ -917,7 +988,8 @@ async def tail_file_tool(path: str, lines: int = 100) -> str:
         real_cwd = await _get_current_cwd()
         # 先打行号，再 tail
         script = f"""cat -n "{path}" | tail -n {lines}"""
-        return await _exec_docker_cmd_simple(real_cwd, ["sh", "-c", script])
+        raw_output = await _exec_docker_cmd_simple(real_cwd, ["sh", "-c", script])
+        return _maybe_mask_output(path, raw_output)
     except Exception as e: return str(e)
 
 async def edit_file_tool(path: str, content: str) -> str:
@@ -935,10 +1007,41 @@ async def edit_file_tool(path: str, content: str) -> str:
         return f"[Success] Saved {path}"
     except Exception as e: return str(e)
 
+def _mask_grep_output(grep_output: str) -> str:
+    """对 grep 输出进行脱敏，对于 .env 文件中的匹配行，遮蔽 VALUE 部分"""
+    if not grep_output:
+        return grep_output
+    lines = grep_output.splitlines()
+    masked_lines = []
+    for line in lines:
+        # grep 输出格式通常为：filename:line_number:matched_text
+        parts = line.split(':', 2)
+        if len(parts) >= 3:
+            fname = parts[0]
+            line_no = parts[1]
+            content = parts[2]
+            # 如果文件名匹配 .env 模式，脱敏内容
+            if _is_env_file(fname) or '.env' in fname.lower():
+                content = _mask_env_content(content)
+            masked_lines.append(f"{fname}:{line_no}:{content}")
+        else:
+            masked_lines.append(line)
+    return "\n".join(masked_lines)
+
+
 async def search_files_tool(pattern: str, path: str = ".") -> str:
     try:
         real_cwd = await _get_current_cwd()
-        return await _exec_docker_cmd_simple(real_cwd, ["grep", "-rn", pattern, path])
+        raw_output = await _exec_docker_cmd_simple(real_cwd, ["grep", "-rn", pattern, path])
+        # 脱敏
+        if _is_env_file(path) or '.env' in path.lower():
+            return _mask_grep_output(raw_output)
+        # 如果 path 本身不是 .env，但 grep 结果中可能包含 .env 文件，仍需脱敏
+        # 简单方案：始终检查结果中是否包含 .env，调用 _mask_grep_output
+        # 为避免性能影响，只在 raw_output 中包含 '.env' 时脱敏
+        if '.env' in raw_output.lower():
+            return _mask_grep_output(raw_output)
+        return raw_output
     except Exception as e: return str(e)
 
 
@@ -1114,7 +1217,7 @@ def validate_bash_command(command: str, cwd: str, mode: str = "default") -> Tupl
             # Linux/Mac 提权与远程加载
             (r'(?:\s|^)sudo\s+', "sudo usage blocked (prevents password wait/escalation)"),
             (r'(curl|wget).*\|\s*(sh|bash|zsh|python|perl|php)', "Remote execution via pipe"),
-            (r'\$\{?HOME\}?', "HOME env variable usage"),
+            (r'$\{?HOME\}?', "HOME env variable usage"),
             (r'~\s*/', "Home directory access via ~"),
             # macOS 钓鱼警告 (防范 AI 弹窗骗取用户密码)
             (r'(?:\s|^)osascript\s+-e\s+.*password', "AppleScript password prompt blocked"),
@@ -1312,8 +1415,9 @@ async def read_file_tool_local(path: str, start_line: int = None, end_line: int 
         if truncated:
             res += f"\n\n... [Warning] Content truncated (Safety Limit). Last line read: {line_idx}."
             res += f"\n💡 [Hint] The file is large or has very long lines. Use 'read_file_range_local' to explore specific sections."
-            
-        return res
+        
+        # 脱敏处理
+        return _maybe_mask_output(path, res)
     except Exception as e: 
         return f"[Error] Read failed: {str(e)}"  
 
@@ -1352,8 +1456,10 @@ async def read_file_range_tool_local(path: str, start_line: int, end_line: int) 
             
         if not output and line_idx < start_line:
             return f"[Error] start_line ({start_line}) is beyond file length ({line_idx})."
-            
-        return "\n".join(output)
+        
+        res = "\n".join(output)
+        # 脱敏处理
+        return _maybe_mask_output(path, res)
     except Exception as e: 
         return f"[Error] Range read failed: {str(e)}"
 
@@ -1371,7 +1477,9 @@ async def tail_file_tool_local(path: str, lines: int = 100) -> str:
         subset = all_lines[-lines:] if lines < len(all_lines) else all_lines
         start_idx = max(1, len(all_lines) - lines + 1)
         
-        return "\n".join(f"{i + start_idx:4} | {line.rstrip('\n')}" for i, line in enumerate(subset))
+        res = "\n".join(f"{i + start_idx:4} | {line.rstrip('\n')}" for i, line in enumerate(subset))
+        # 脱敏处理
+        return _maybe_mask_output(path, res)
     except Exception as e: return f"[Error] Tail failed: {str(e)}"
 
 async def edit_file_tool_local(path: str, content: str) -> str:
@@ -1440,7 +1548,11 @@ async def search_files_tool_local(pattern: str, path: str = ".") -> str:
                 )
                 stdout, _ = await proc.communicate()
                 if proc.returncode == 0 and stdout:
-                    return stdout.decode('utf-8', errors='replace').strip()
+                    result = stdout.decode('utf-8', errors='replace').strip()
+                    # 如果搜索路径或结果包含 .env，进行脱敏
+                    if _is_env_file(path) or '.env' in path.lower():
+                        return _mask_grep_output(result)
+                    return result
             except Exception:
                 pass # git grep 失败则回退
 
@@ -1456,7 +1568,7 @@ async def search_files_tool_local(pattern: str, path: str = ".") -> str:
         # 判断文件是否为二进制 (读取前 1024 字节检查 NULL)
         def is_binary(file_path):
             try:
-                with open(file_path, 'rb',encoding='utf-8') as f:
+                with open(file_path, 'rb') as f:
                     chunk = f.read(1024)
                     return b'\0' in chunk
             except:
@@ -1484,6 +1596,9 @@ async def search_files_tool_local(pattern: str, path: str = ".") -> str:
                             if regex.search(line):
                                 # 截断过长的行
                                 clean_line = line.strip()[:200]
+                                # 如果文件是 .env，脱敏
+                                if _is_env_file(file):
+                                    clean_line = _mask_env_content(clean_line)
                                 matches.append(f"{display_path}:{i}:{clean_line}")
                                 if len(matches) >= MAX_RESULTS:
                                     return "\n".join(matches) + f"\n... (Truncated at {MAX_RESULTS} matches)"
