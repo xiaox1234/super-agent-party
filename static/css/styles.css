@@ -4825,13 +4825,12 @@ body {
   background-color: rgba(144, 147, 153, 0.5);
 }
 
+/* 覆盖侧边栏背景，与顶部栏保持一致 */
 .sidebar {
-  /* 磨砂玻璃效果 */
-  background-color: color-mix(in srgb, var(--el-bg-color-page) 85%, transparent) !important;
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border-right: 1px solid rgba(128, 128, 128, 0.1) !important;
-  box-shadow: 2px 0 8px rgba(0,0,0,0.02);
+  background-color: var(--el-bg-color-page) !important;
+  backdrop-filter: none !important;        /* 移除毛玻璃，与顶部栏统一 */
+  -webkit-backdrop-filter: none !important;
+  border-right: 1px solid var(--el-border-color-light) !important; /* 保留分割线 */
 }
 
 /* 菜单项优化 - 胶囊式选中态 */
@@ -12640,4 +12639,54 @@ pre.code-block {
   box-shadow: none !important;
   background-color: var(--el-bg-color) !important;
   border-color: var(--bg-color) !important;
+}
+
+
+.docker-registry-switch {
+  display: inline-flex;
+  background-color: color-mix(in srgb, var(--el-text-color-primary) 6%, transparent);
+  border-radius: 40px;
+  padding: 4px;
+  gap: 4px;
+  margin-bottom: 12px;
+  transition: background-color 0.2s ease;
+
+  .switch-option {
+    font-size: 13px;
+    font-weight: 500;
+    padding: 6px 20px;
+    border-radius: 32px;
+    cursor: pointer;
+    color: var(--el-text-color-regular);
+    background: transparent;
+    transition: all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+    text-align: center;
+    white-space: nowrap;
+
+    &:hover {
+      color: var(--el-color-primary);
+      background-color: color-mix(in srgb, var(--el-color-primary) 12%, transparent);
+    }
+
+    &.active {
+      background: var(--el-bg-color);
+      color: var(--el-color-primary);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.03);
+      font-weight: 600;
+
+      [data-theme="dark"] &,
+      [data-theme="midnight"] &,
+      [data-theme="neon"] & {
+        background: var(--el-bg-color);
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+      }
+    }
+  }
+
+  @media (max-width: 480px) {
+    .switch-option {
+      padding: 5px 16px;
+      font-size: 12px;
+    }
+  }
 }

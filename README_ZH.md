@@ -152,33 +152,52 @@ chmod +x 一键更新(update).sh 一键启动(start).sh
 
   👉 [点击下载](https://github.com/heshengtao/super-agent-party/releases/download/v0.4.1/Super-Agent-Party-0.4.1-Linux.deb)
 
-### docker部署（该版本桌宠只能通过浏览器查看）
 
-- 两行命令安装本项目：
-  ```shell
-  docker pull ailm32442/super-agent-party:latest
-  docker run -d -p 3456:3456 -v ./super-agent-data:/app/data ailm32442/super-agent-party:latest
-  ```
+### Docker 部署（该版本桌宠只能通过浏览器查看）
 
-- ⭐注意！`./super-agent-data`可以替换为任意本地文件夹，docker启动后，所有数据都将缓存到该本地文件夹，不会上传到任何地方。
+#### 国际用户（Docker Hub）
 
-- 开箱即用：访问http://localhost:3456/
+```shell
+docker pull ailm32442/super-agent-party:latest
+docker run -d -p 3456:3456 -v ./super-agent-data:/app/data ailm32442/super-agent-party:latest
+```
 
-### docker compose部署（该版本桌宠只能通过浏览器查看，会额外启动一个网关容器，用于登录管理）
+#### 中国用户（阿里云 ACR，拉取更快）
 
-- 安装本项目：
+```shell
+docker pull crpi-9mgnqijkd7wc42x2.cn-shenzhen.personal.cr.aliyuncs.com/ailm32442/super-agent-party:latest
+docker run -d -p 3456:3456 -v ./super-agent-data:/app/data crpi-9mgnqijkd7wc42x2.cn-shenzhen.personal.cr.aliyuncs.com/ailm32442/super-agent-party:latest
+```
 
-  ```shell
-  git clone https://github.com/heshengtao/super-agent-party.git
-  cd super-agent-party
-  docker-compose up -d
-  ```
+⭐ 注意！`./super-agent-data` 可以替换为任意本地文件夹，docker 启动后，所有数据都将缓存到该本地文件夹，不会上传到任何地方。
 
-- ⭐注意！初始用户名为`root`，初始密码为`pass`，首次登录后请修改密码。
+**开箱即用：** 访问 http://localhost:3456/
 
-- 开箱即用：访问http://localhost:3456/
+---
 
-- API key管理： 访问http://localhost:3456/token.html
+### Docker Compose 部署（该版本桌宠只能通过浏览器查看，会额外启动一个网关容器，用于登录管理）
+
+#### 国际用户（Docker Hub）
+
+```shell
+git clone https://github.com/heshengtao/super-agent-party.git
+cd super-agent-party
+docker-compose up -d
+```
+
+#### 中国用户（阿里云 ACR，拉取更快）
+
+```shell
+git clone https://github.com/heshengtao/super-agent-party.git
+cd super-agent-party
+docker-compose -f docker-compose-acr.yml up -d
+```
+
+⭐ 注意！初始用户名为 `root`，初始密码为 `pass`，首次登录后请修改密码。
+
+**开箱即用：** 访问 http://localhost:3456/
+
+**API key 管理：** 访问 http://localhost:3456/token.html
 
 ### 与docker版本配套的轻量版客户端，将你的docker版本变成桌面端
 

@@ -151,33 +151,51 @@ We provide two mainstream Linux installation package formats for your convenienc
 
   👉 [Click to download](https://github.com/heshengtao/super-agent-party/releases/download/v0.4.1/Super-Agent-Party-0.4.1-Linux.deb)
 
-### Docker Deployment (This version of the table pet can only be viewed through the browser.)
+### Docker Deployment (This version of the desktop pet can only be viewed through a browser)
 
-- Two commands to install this project:
-  ```shell
-  docker pull ailm32442/super-agent-party:latest
-  docker run -d -p 3456:3456 -v ./super-agent-data:/app/data ailm32442/super-agent-party:latest
-  ```
+#### International Users (Docker Hub)
 
-- ⭐Note! `./super-agent-data` can be replaced with any local folder, after Docker starts, all data will be cached in this local folder and will not be uploaded anywhere.
+```shell
+docker pull ailm32442/super-agent-party:latest
+docker run -d -p 3456:3456 -v ./super-agent-data:/app/data ailm32442/super-agent-party:latest
+```
 
-- Ready to use: access http://localhost:3456/
+#### Chinese Users (Alibaba Cloud ACR, faster pull)
 
-### Docker Compose Deployment (This version of the desktop pet can only be viewed through a browser. An additional gateway container will be started for login management.)
+```shell
+docker pull crpi-9mgnqijkd7wc42x2.cn-shenzhen.personal.cr.aliyuncs.com/ailm32442/super-agent-party:latest
+docker run -d -p 3456:3456 -v ./super-agent-data:/app/data crpi-9mgnqijkd7wc42x2.cn-shenzhen.personal.cr.aliyuncs.com/ailm32442/super-agent-party:latest
+```
 
-- Install the project:
+⭐ Note! `./super-agent-data` can be replaced with any local folder. After Docker starts, all data will be cached in this local folder and will not be uploaded anywhere.
 
-  ```shell
-  git clone https://github.com/heshengtao/super-agent-party.git
-  cd super-agent-party
-  docker-compose up -d
-  ```
+**Out of the box:** Visit http://localhost:3456/
 
-- ⭐Note! The default username is `root`, and the default password is `pass`. Please change the password after the first login.
+---
 
-- Ready to use: Visit http://localhost:3456/
+### Docker Compose Deployment (This version of the desktop pet can only be viewed through a browser, and an additional gateway container will be started for login management)
 
-- API key management: Visit http://localhost:3456/token.html
+#### International Users (Docker Hub)
+
+```shell
+git clone https://github.com/heshengtao/super-agent-party.git
+cd super-agent-party
+docker-compose up -d
+```
+
+#### Chinese Users (Alibaba Cloud ACR, faster pull)
+
+```shell
+git clone https://github.com/heshengtao/super-agent-party.git
+cd super-agent-party
+docker-compose -f docker-compose-acr.yml up -d
+```
+
+⭐ Note! The default username is `root`, and the default password is `pass`. Please change the password after the first login.
+
+**Out of the box:** Visit http://localhost:3456/
+
+**API key management:** Visit http://localhost:3456/token.html
 
 ### Lite client that matches your Docker version, turning Docker into a desktop app
 

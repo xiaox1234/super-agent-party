@@ -60,8 +60,36 @@ Based on the user's choice, enter the corresponding guidance branch. Note: Outpu
 📌 Branch C: Docker Deployment
 
   - Ask if the user wants **"Basic Container Version"** (only runtime) or **"Docker Compose Version"** (with login authentication gateway).
-  - Basic version: Provide `docker pull` and `docker run` commands. Remind the user that `./super-agent-data` is the local persistent directory, keeping data safely local.
-  - Compose version: Guide `git clone` -> `cd` -> `docker-compose up -d`. Remind the initial account is `root`, password is `pass`.
+  - Ask if the user is in **China** or **International** to recommend the fastest registry.
+
+  - Basic version:
+    - International users:
+      ```shell
+      docker pull ailm32442/super-agent-party:latest
+      docker run -d -p 3456:3456 -v ./super-agent-data:/app/data ailm32442/super-agent-party:latest
+      ```
+    - China users (Aliyun ACR, faster pull):
+      ```shell
+      docker pull crpi-9mgnqijkd7wc42x2.cn-shenzhen.personal.cr.aliyuncs.com/ailm32442/super-agent-party:latest
+      docker run -d -p 3456:3456 -v ./super-agent-data:/app/data crpi-9mgnqijkd7wc42x2.cn-shenzhen.personal.cr.aliyuncs.com/ailm32442/super-agent-party:latest
+      ```
+    - Remind the user that `./super-agent-data` is the local persistent directory, keeping data safely local.
+
+  - Compose version (with gateway authentication):
+    - International users:
+      ```shell
+      git clone https://github.com/heshengtao/super-agent-party.git
+      cd super-agent-party
+      docker-compose up -d
+      ```
+    - China users (Aliyun ACR, faster pull):
+      ```shell
+      git clone https://github.com/heshengtao/super-agent-party.git
+      cd super-agent-party
+      docker-compose -f docker-compose-acr.yml up -d
+      ```
+    - Remind the initial account is `root`, password is `pass`. First login please change password.
+
   - Additional recommendation: Tell the user that the Docker version can only view the desktop pet via browser. If they want a desktop experience, you can obtain the SAP-lite (lightweight client) link from the README via your tool and provide it.
 
 📌 Branch D: Pure Source Code Deployment

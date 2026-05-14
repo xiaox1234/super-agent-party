@@ -1330,6 +1330,22 @@ const app = Vue.createApp({
     return this.extensions.filter(ext => this.favoriteExtensionIds.includes(ext.id));
   },
 
+  dockerBasicCommand() {
+    const img = this.dockerImages[this.dockerRegistry].backend;
+    return `docker pull ${img}
+docker run -d \\
+  -p 3456:3456 \\
+  -v ./super-agent-data:/app/data \\
+  ${img}`;
+  },
+  
+  dockerComposeCommand() {
+    const composeFile = this.dockerImages[this.dockerRegistry].composeFile;
+    return `git clone https://github.com/heshengtao/super-agent-party.git
+cd super-agent-party
+docker-compose -f ${composeFile} up -d`;
+  },
+
     // 动态过滤表格数据
     filteredAffectionData() {
       console.log("计算属性触发，当前数据长度:", this.affectionDataList.length);

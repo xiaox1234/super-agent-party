@@ -2012,6 +2012,21 @@ docker run -d \\
 cd super-agent-party
 docker-compose up -d
 `,
+    dockerRegistry: 'international', // 默认国际源，用户可切换
+    
+    // 镜像地址配置
+    dockerImages: {
+      international: {
+        backend: 'ailm32442/super-agent-party:latest',
+        gateway: 'ailm32442/nginx-for-sap:latest',
+        composeFile: 'docker-compose.yml'
+      },
+      china: {
+        backend: 'crpi-9mgnqijkd7wc42x2.cn-shenzhen.personal.cr.aliyuncs.com/ailm32442/super-agent-party:latest',
+        gateway: 'crpi-9mgnqijkd7wc42x2.cn-shenzhen.personal.cr.aliyuncs.com/ailm32442/nginx-for-sap:latest',
+        composeFile: 'docker-compose-acr.yml'
+      }
+    },
     browserEmbedCodeExamples: `<div id="super-agent-party">
   <iframe 
     src="${backendURL}/chat.html" 
