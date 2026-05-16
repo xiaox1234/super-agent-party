@@ -1766,29 +1766,29 @@ loader.load(
         isVRM1 = vrm.meta.metaVersion === '1';
         VRMUtils.rotateVRM0(vrm); // 旋转 VRM 使其面向正前方
         // calling these functions greatly improves the performance
-        VRMUtils.removeUnnecessaryVertices( gltf.scene );
+        // VRMUtils.removeUnnecessaryVertices( gltf.scene );
 
         // 添加材质修复
-        gltf.scene.traverse((obj) => {
-        if (obj.isMesh && obj.material) {
-            // 解决透明材质黑边问题
-            if (obj.material.transparent) {
-                obj.material.alphaTest = 0.01;
-                obj.material.depthWrite = true;
-                obj.material.needsUpdate = true;
-            }
+        // gltf.scene.traverse((obj) => {
+        // if (obj.isMesh && obj.material) {
+        //     // 解决透明材质黑边问题
+        //     if (obj.material.transparent) {
+        //         obj.material.alphaTest = 0.01;
+        //         obj.material.depthWrite = true;
+        //         obj.material.needsUpdate = true;
+        //     }
             
-            // 确保正确混合模式
-            obj.material.blending = THREE.NormalBlending;
-            obj.material.premultipliedAlpha = false;
+        //     // 确保正确混合模式
+        //     obj.material.blending = THREE.NormalBlending;
+        //     obj.material.premultipliedAlpha = false;
             
-            // 设置渲染顺序
-            obj.renderOrder = obj.material.transparent ? 1 : 0;
-        }
-        });
+        //     // 设置渲染顺序
+        //     obj.renderOrder = obj.material.transparent ? 1 : 0;
+        // }
+        // });
 
-        VRMUtils.combineSkeletons( gltf.scene );
-        VRMUtils.combineMorphs( vrm );
+        // VRMUtils.combineSkeletons( gltf.scene );
+        // VRMUtils.combineMorphs( vrm );
 
         // 启用 Spring Bone 物理模拟
         if (vrm.springBoneManager) {
@@ -4625,28 +4625,28 @@ async function switchToModel(index,isRefresh = false) {
                 isVRM1 = vrm.meta.metaVersion === '1';
                 VRMUtils.rotateVRM0(vrm); // 旋转 VRM 使其面向正前方
                 // 优化性能
-                VRMUtils.removeUnnecessaryVertices(gltf.scene);
+                // VRMUtils.removeUnnecessaryVertices(gltf.scene);
                 // 添加材质修复
-                gltf.scene.traverse((obj) => {
-                if (obj.isMesh && obj.material) {
-                    // 解决透明材质黑边问题
-                    if (obj.material.transparent) {
-                        obj.material.alphaTest = 0.01;
-                        obj.material.depthWrite = true;
-                        obj.material.needsUpdate = true;
-                    }
+                // gltf.scene.traverse((obj) => {
+                // if (obj.isMesh && obj.material) {
+                //     // 解决透明材质黑边问题
+                //     if (obj.material.transparent) {
+                //         obj.material.alphaTest = 0.01;
+                //         obj.material.depthWrite = true;
+                //         obj.material.needsUpdate = true;
+                //     }
                     
-                    // 确保正确混合模式
-                    obj.material.blending = THREE.NormalBlending;
-                    obj.material.premultipliedAlpha = false;
+                //     // 确保正确混合模式
+                //     obj.material.blending = THREE.NormalBlending;
+                //     obj.material.premultipliedAlpha = false;
                     
-                    // 设置渲染顺序
-                    obj.renderOrder = obj.material.transparent ? 1 : 0;
-                }
-                });
+                //     // 设置渲染顺序
+                //     obj.renderOrder = obj.material.transparent ? 1 : 0;
+                // }
+                // });
 
-                VRMUtils.combineSkeletons(gltf.scene);
-                VRMUtils.combineMorphs(vrm);
+                // VRMUtils.combineSkeletons(gltf.scene);
+                // VRMUtils.combineMorphs(vrm);
                 
                 // 启用 Spring Bone 物理模拟
                 if (vrm.springBoneManager) {
