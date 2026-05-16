@@ -3,7 +3,6 @@ import platform
 from PyInstaller.utils.hooks import collect_submodules, collect_data_files  
 from imageio_ffmpeg import get_ffmpeg_exe                                
 
-
 _ = get_ffmpeg_exe()
 # ---------- 1. 收集 imageio-ffmpeg 的 binaries & datas ----------
 ffmpeg_bin = [(get_ffmpeg_exe(), '.')]                                  
@@ -26,6 +25,8 @@ my_hidden_imports = [
     *collect_submodules('mem0'),
 ]
 
+my_extra_datas = []
+
 if platform.system() != 'Windows':
     # 添加 zerobox 及其所有子模块
     my_hidden_imports.extend(collect_submodules('zerobox'))
@@ -44,7 +45,8 @@ a = Analysis(
         ('vrm', 'vrm'),
         ('tiktoken_cache', 'tiktoken_cache'),
         ('skills', 'skills'),
-        *ffmpeg_data, 
+        *ffmpeg_data,
+        *my_extra_datas,
     ],
     hiddenimports=my_hidden_imports,
     hookspath=[],
@@ -68,13 +70,12 @@ base_exe_config = {
 }
 
 if platform.system() == 'Darwin':
-    # macOS 特殊配置
+    # macOS 配置：生成独立可执行文件，不使用 BUNDLE（避免 .app 包）
     exe = EXE(
         pyz,
         a.scripts,
         [],
         name='server',
-        argv_emulation=True,
         icon='static/source/icon.png',
         **base_exe_config
     )
@@ -84,19 +85,6 @@ if platform.system() == 'Darwin':
         a.datas,
         name='server',
         upx_exclude=[],
-        **universal_disable_sign
-    )
-    # macOS 专用 .app 配置
-    app = BUNDLE(
-        coll,
-        name='server.app',
-        icon='static/source/icon.png',
-        bundle_identifier='com.superagent.party',
-        info_plist={
-            'NSHighResolutionCapable': 'True',
-            'LSBackgroundOnly': 'True',
-            'NSAppleScriptEnabled': 'NO'
-        },
         **universal_disable_sign
     )
 elif platform.system() == 'Windows':
