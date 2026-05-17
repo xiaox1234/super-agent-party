@@ -5,10 +5,28 @@ on:
     tags: [ "v*.*.*" ]
   workflow_dispatch:
     inputs:
-      version:
-        description: '镜像版本号 (如 v1.2.3)'
+      platform:
+        description: '选择构建平台'
         required: true
+        type: choice
+        default: 'all'
+        options:
+          - all
+          - windows-x64
+          - linux-x64
+          - linux-arm64
+          - macos-x64
+          - macos-arm64
+      version:
+        description: '版本号（例如：0.5.0，不要带 v 前缀）'
+        required: false
+        type: string
         default: ''
+      create_release:
+        description: '是否创建 GitHub Release'
+        required: true
+        type: boolean
+        default: false
 
 jobs:
   build:
