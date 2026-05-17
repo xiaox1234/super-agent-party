@@ -87,7 +87,13 @@
     "mac": {
       "icon": "static/source/icon.icns",
       "target": [
-        "dmg"
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
       ],
       "artifactName": "${productName}-${version}-Mac-${arch}.${ext}",
       "category": "public.app-category.utilities",
