@@ -2,14 +2,30 @@ name: Build and Release
 
 on:
   push:
-    tags: [ "v*.*.*" ] 
+    tags: [ "v*.*.*" ]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '镜像版本号 (如 v1.2.3)'
+        required: true
+        default: ''
 
 jobs:
   build:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [windows-latest, ubuntu-latest]
+        include:
+          - os: windows-latest
+            arch: x64
+          - os: ubuntu-latest
+            arch: x64
+          - os: ubuntu-24.04-arm
+            arch: arm64
+          - os: macos-13
+            arch: x64
+          - os: macos-latest
+            arch: arm64
 
     permissions:
       contents: write
@@ -50,8 +66,11 @@ jobs:
             windows-latest)
               npx electron-builder build --win --publish always
               ;;
-            ubuntu-latest)
+            ubuntu-latest|ubuntu-24.04-arm)
               npx electron-builder build --linux --publish always
+              ;;
+            macos-13|macos-latest)
+              npx electron-builder build --mac --publish always
               ;;
           esac
         env:

@@ -80,24 +80,22 @@
     "linux": {
       "icon": "static/source/icon.png",
       "target": [
-        "AppImage",
-        "deb"
+        "AppImage"
       ],
-      "artifactName": "${productName}-${version}-Linux.${ext}"
+      "artifactName": "${productName}-${version}-Linux-${arch}.${ext}"
     },
     "mac": {
       "icon": "static/source/icon.icns",
       "target": [
         "dmg"
       ],
-      "artifactName": "${productName}-${version}-Mac.${ext}",
+      "artifactName": "${productName}-${version}-Mac-${arch}.${ext}",
       "category": "public.app-category.utilities",
-      "identity": "super-agent-party",
-      "hardenedRuntime": true,
+      "identity": "-",
+      "hardenedRuntime": false,
       "gatekeeperAssess": false,
       "entitlements": "entitlements.mac.plist",
       "entitlementsInherit": "entitlements.mac.plist",
-      "type": "distribution",
       "asarUnpack": "**/*.node",
       "extendInfo": {
         "NSRequiresAquaSystemAppearance": false
