@@ -285,6 +285,7 @@ let vue_methods = {
     this.showEditDialog = false;
     if (this.editType === 'system') {
       this.system_prompt = this.editContent;
+      this.syncSystemPromptToMessages(this.system_prompt);
     }
     if (this.editType === 'user') {
       // 移除this.editIndex之后的所有消息

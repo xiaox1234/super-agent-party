@@ -2918,7 +2918,7 @@ function updateElement(el, rawMarkdown, formatFn) {
             <template #footer v-if="editType !== 'assistant'">
               <el-button @click="showEditDialog = false">{{ t('cancel') }}</el-button>
               <el-button @click="switchToSystemPrompts" v-if="editType === 'system'">{{ t('addSystemPrompt') }}</el-button>
-              <el-button type="primary" @click="saveEdit" v-if="editType === 'user'" >{{ t('modifyAndSend') }}</el-button>
+              <el-button type="primary" @click="saveEdit" v-if="editType !== 'assistant'" >{{ editType === 'user' ? t('modifyAndSend'):t('save') }}</el-button>
             </template>
           </el-dialog>
 
