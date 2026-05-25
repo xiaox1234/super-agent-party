@@ -9323,6 +9323,19 @@ handleCreateSlackSeparator(val) {
             }
 
             try {
+
+                if (!audioChunk.buffer && audioChunk.url) {
+                    try {
+                        const res = await fetch(audioChunk.url);
+                        audioChunk.buffer = await res.arrayBuffer();
+                        if (!audioChunk.mimeType) {
+                            audioChunk.mimeType = res.headers.get('content-type') || 'audio/wav';
+                        }
+                    } catch (err) {
+                        console.warn("Failed to fetch buffer for history audio", err);
+                    }
+                }
+
                 // --- 核心同步修改点：只有非弹幕块且 VRM 在线时，才在此刻发送二进制数据 ---
                 if (!isVrmSilent && vrmIndex >= 0 && (this.vrmOnline || this.vtsOnline) && audioChunk.buffer) {
                     const metadata = {
@@ -9411,19 +9424,23 @@ handleCreateSlackSeparator(val) {
         this.stopAllAudioPlayback();
         
         if (message.isOmni) {
-          // --- 核心逻辑：检查是否播放到了末尾 ---
-          // 如果当前时间 >= 总时长 (减去一个极小的偏移量防止浮点误差)
+          // --- Omni 逻辑保持不变 ---
           if ((message.omniCurrentTime || 0) >= (message.omniDuration || 0) - 0.1) {
             console.log('Omni audio at end, restarting from beginning');
-            message.omniCurrentTime = 0; // 重头开始
+            message.omniCurrentTime = 0; 
           }
-          
           message.isPlaying = true;
           this.playOmniFromTime(message, message.omniCurrentTime);
         } else {
-          // 普通 TTS 逻辑
-          message.isPlaying = true;
-          this.playAudioChunk(message);
+          // --- 普通 TTS 逻辑：统一复用流式播放函数 ---
+          message.isPlaying = false; // 先设为false，让 checkAudioPlayback 去接管并设为 true
+          message.currentChunk = 0;  // 从头开始播放
+          
+          // 确保 generationFinished 为 true，因为这是历史消息回放
+          message.generationFinished = true; 
+          
+          // 直接调用核心音频队列监控函数
+          this.checkAudioPlayback(message);
         }
       }
     },
