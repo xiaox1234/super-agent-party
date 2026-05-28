@@ -9323,6 +9323,19 @@ handleCreateSlackSeparator(val) {
             }
 
             try {
+
+                if (!audioChunk.buffer && audioChunk.url) {
+                    try {
+                        const res = await fetch(audioChunk.url);
+                        audioChunk.buffer = await res.arrayBuffer();
+                        if (!audioChunk.mimeType) {
+                            audioChunk.mimeType = res.headers.get('content-type') || 'audio/wav';
+                        }
+                    } catch (err) {
+                        console.warn("Failed to fetch buffer for history audio", err);
+                    }
+                }
+
                 // --- 核心同步修改点：只有非弹幕块且 VRM 在线时，才在此刻发送二进制数据 ---
                 if (!isVrmSilent && vrmIndex >= 0 && (this.vrmOnline || this.vtsOnline) && audioChunk.buffer) {
                     const metadata = {
@@ -9411,19 +9424,23 @@ handleCreateSlackSeparator(val) {
         this.stopAllAudioPlayback();
         
         if (message.isOmni) {
-          // --- 核心逻辑：检查是否播放到了末尾 ---
-          // 如果当前时间 >= 总时长 (减去一个极小的偏移量防止浮点误差)
+          // --- Omni 逻辑保持不变 ---
           if ((message.omniCurrentTime || 0) >= (message.omniDuration || 0) - 0.1) {
             console.log('Omni audio at end, restarting from beginning');
-            message.omniCurrentTime = 0; // 重头开始
+            message.omniCurrentTime = 0; 
           }
-          
           message.isPlaying = true;
           this.playOmniFromTime(message, message.omniCurrentTime);
         } else {
-          // 普通 TTS 逻辑
-          message.isPlaying = true;
-          this.playAudioChunk(message);
+          // --- 普通 TTS 逻辑：统一复用流式播放函数 ---
+          message.isPlaying = false; // 先设为false，让 checkAudioPlayback 去接管并设为 true
+          message.currentChunk = 0;  // 从头开始播放
+          
+          // 确保 generationFinished 为 true，因为这是历史消息回放
+          message.generationFinished = true; 
+          
+          // 直接调用核心音频队列监控函数
+          this.checkAudioPlayback(message);
         }
       }
     },
@@ -11335,29 +11352,23 @@ resumeRead() {
         const voice = this.readState.chunks_voice[index];
         const cachedAudio = this.readState.audioChunks[index];
 
-        // 检查缓存是否命中
-        if (cachedAudio?.url && cachedAudio?.base64 && cachedAudio?.text === chunk && cachedAudio?.voice === voice) {
-          this.cur_audioDatas[index] = cachedAudio.base64;
+        // --- 修改点 1：将缓存检查中的 base64 改为 buffer ---
+        if (cachedAudio?.url && cachedAudio?.buffer && cachedAudio?.text === chunk && cachedAudio?.voice === voice){
+          // this.cur_audioDatas[index] = cachedAudio.buffer; // 可省略，直接用 readState
         }
         else{
-          /* —— 与对话版完全一致的文本清洗 —— */
           let chunk_text = chunk;
           let  chunk_expressions = [];
           if (chunk.indexOf('<') !== -1) {
               const tagReg = /<[^>]+>/g;
-              chunk_expressions = (chunk.match(tagReg) || []).map(t => t.slice(1, -1)); // 去掉两端的 <>
+              chunk_expressions = (chunk.match(tagReg) || []).map(t => t.slice(1, -1));
               chunk_text = chunk.replace(tagReg, '').trim();
           }
 
           const res = await fetch('/tts', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              ttsSettings: this.ttsSettings,
-              text: chunk_text,
-              index,
-              voice
-            })
+            body: JSON.stringify({ ttsSettings: this.ttsSettings, text: chunk_text, index, voice })
           });
 
           if (!res.ok) throw new Error('TTS failed');
@@ -11365,50 +11376,35 @@ resumeRead() {
           const blob = await res.blob();
           const url  = URL.createObjectURL(blob);
 
-          /* Base64 给 VRM */
-          const base64 = await new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload  = () => resolve(reader.result.split(',')[1]);
-            reader.onerror = reject;
-            reader.readAsDataURL(blob);
-          });
-          this.cur_audioDatas[index] = `data:${blob.type};base64,${base64}`;
-          /* 缓存两样东西 */
+          // --- 修改点 2：抛弃 Base64，改用 ArrayBuffer ---
+          const audioBuffer = await blob.arrayBuffer();
+
           this.readState.audioChunks[index] = {
-            url,                       // 本地播放用
+            url,                       
             expressions: chunk_expressions,
-            base64: this.cur_audioDatas[index], // VRM 播放用
+            buffer: audioBuffer, // <--- 缓存二进制
+            mimeType: blob.type, // <--- 保存真实的类型
             text: chunk_text,
             index,
             voice
           };
         }
 
-        /* 新增: 增加已生成片段计数 */
         this.audioChunksCount++;
-        
-        /* 新增: 检查是否全部合成完成 */
         if (this.audioChunksCount >= this.totalChunksCount) {
           this.isAudioSynthesizing = false;
-          this.audioChunksCount = this.totalChunksCount; // 重置计数
+          this.audioChunksCount = this.totalChunksCount; 
         }
 
-        /* 立刻尝试播放 */
         this.checkReadAudioPlayback();
       } catch (e) {
         console.error(`Read TTS chunk ${index} error`, e);
-        this.readState.audioChunks[index] = { url: null, expressions: chunk_expressions, text: chunk_text, index };
-        this.cur_audioDatas[index] = null;
-        
-        /* 新增: 处理错误时也增加计数 */
+        this.readState.audioChunks[index] = { url: null, expressions: [], text: "", index };
         this.audioChunksCount++;
-        
-        /* 新增: 检查是否全部合成完成 */
         if (this.audioChunksCount >= this.totalChunksCount) {
           this.isAudioSynthesizing = false;
-          this.audioChunksCount = this.totalChunksCount; // 重置计数
+          this.audioChunksCount = this.totalChunksCount; 
         }
-        
         this.checkReadAudioPlayback();
       }
     },
@@ -11883,6 +11879,7 @@ stopTTSActivities() {
 
         const blob = await res.blob();
         const url = URL.createObjectURL(blob);
+        const audioBuffer = await blob.arrayBuffer();
         /* Base64 给 VRM */
         const base64 = await new Promise((resolve, reject) => {
           const reader = new FileReader();
@@ -11895,7 +11892,8 @@ stopTTSActivities() {
         this.readState.audioChunks[index] = {
           url,                       // 本地播放用
           expressions: chunk_expressions,
-          base64: this.cur_audioDatas[index], // VRM 播放用
+          buffer: audioBuffer, 
+          mimeType: blob.type, 
           text: chunk_text,
           index,
           voice
@@ -11939,7 +11937,6 @@ stopTTSActivities() {
     const curIdx = this.readState.currentChunk;
     const total  = this.readState.ttsChunks.length;
     if (curIdx >= total) {
-      /* 全部读完 */
       console.log('All read audio chunks played');
       this.readState.currentChunk = 0;
       this.isReadRunning = false;
@@ -11951,15 +11948,28 @@ stopTTSActivities() {
     const audioChunk = this.readState.audioChunks[curIdx];
     if (!audioChunk) return;
 
-    /* 开始播放这一块 */
     this.readState.isPlaying = true;
     console.log(`Playing read audio chunk ${curIdx}`);
     this.scrollToCurrentChunk(curIdx);
+    
     try {
+      // --- 修改点 5：发送二进制数据到 VRM (照搬对话播放的核心逻辑) ---
+      if ((this.vrmOnline || this.vtsOnline) && audioChunk.buffer) {
+          const metadata = {
+              type: 'audio_chunk',
+              chunkIndex: curIdx,
+              text: audioChunk.text,
+              expressions: audioChunk.expressions,
+              mimeType: audioChunk.mimeType || 'audio/wav'
+          };
+          this.sendBinaryToVRM(metadata, audioChunk.buffer);
+      }
+
       this.currentReadAudio = new Audio(audioChunk.url);
       this.currentReadAudio.volume = this.vrmOnline ? 0.0000001 : 1; // VRM在线时静音
+
+      // --- 修改点 6：剔除 audioDataUrl，仅发送状态指令 ---
       this.sendTTSStatusToVRM('startSpeaking', {
-        audioDataUrl: this.cur_audioDatas[curIdx],
         chunkIndex: curIdx,
         totalChunks: total,
         text: audioChunk.text,
@@ -13163,11 +13173,16 @@ async playSingleSegment(idx) {
     const voice = this.readState.chunks_voice[idx];
     const cachedAudio = this.readState.audioChunks[idx];
 
-    // 检查缓存是否命中
-    if (cachedAudio?.url && cachedAudio?.base64 && cachedAudio?.text === chunk && cachedAudio?.voice === voice) {
-      this.doPlayAudio(this.readState.audioChunks[idx].url, idx, false); // false=不连播
+    // ★ 核心修复：独立播放时，也将其视作一次全新的会话
+    this.sendTTSStatusToVRM('stopSpeaking', {});
+    this.readState.vrmIndex = 0; // 无论点第几行，VRM 那边收到的都是 0 
+    this.sendTTSStatusToVRM('ttsStarted', { totalChunks: 1 });
+
+    if (cachedAudio?.url && cachedAudio?.buffer && cachedAudio?.text === chunk && cachedAudio?.voice === voice) {
+      this.doPlayAudio(this.readState.audioChunks[idx].url, idx, false);
       return;
     }
+    
     // 未命中先合成
     await this.synthSegment(idx);
     this.doPlayAudio(this.readState.audioChunks[idx].url, idx, false);
@@ -13180,15 +13195,23 @@ async playSingleSegment(idx) {
 /* 3. 连续播放开关                                   */
 /* -------------------------------------------------- */
 async toggleContinuousPlay() {
-  if (this.readState.isPlaying) {          // 暂停
-    this.stopSegmentTTS(isEnd=false);
+  if (this.readState.isPlaying) {          
+    this.stopSegmentTTS(false);
     return;
   }
-  this.readState.isPlaying   = true;
-  if (this.readState.currentChunk < 0 || this.readState.currentChunk >= this.readState.ttsChunks.length) { // 从头开始
-    this.readState.currentChunk = 0;         // 从第一句开始
+  this.readState.isPlaying = true;
+  if (this.readState.currentChunk < 0 || this.readState.currentChunk >= this.readState.ttsChunks.length) { 
+    this.readState.currentChunk = 0;         
   }
-  await this.playNextInQueue(true);        // true 表示连续
+
+  // ★ 核心修复：强行中止之前不管有没有播完的状态，并重置 VRM 的期待序号
+  this.sendTTSStatusToVRM('stopSpeaking', {});
+  this.readState.vrmIndex = 0; // 重置虚拟序号
+  this.sendTTSStatusToVRM('ttsStarted', {
+    totalChunks: this.readState.ttsChunks.length - this.readState.currentChunk
+  });
+
+  await this.playNextInQueue(true);
 },
 
 /* -------------------------------------------------- */
@@ -13242,13 +13265,13 @@ async synthSegment(idx) {
   try {
     const text  = this.readState.ttsChunks[idx];
     const voice = this.readState.chunks_voice[idx] || 'default';
-    /* —— 与对话版完全一致的文本清洗 —— */
+    /* —— 文本清洗 —— */
     let chunk_text = text;
     let chunk_expressions =[];
     if (text.indexOf('<') !== -1) {
       const tagReg = /<[^>]+>/g;
-      chunk_expressions = (text.match(tagReg) || []).map(t => t.slice(1, -1)); // 去掉两端的 <>
-      chunk_text = text.replace(tagReg, '').trim(); // 把标签从正文里删掉
+      chunk_expressions = (text.match(tagReg) || []).map(t => t.slice(1, -1));
+      chunk_text = text.replace(tagReg, '').trim(); 
     }
     const res = await fetch('/tts', {
       method : 'POST',
@@ -13260,19 +13283,15 @@ async synthSegment(idx) {
     const blob = await res.blob();
     const url  = URL.createObjectURL(blob);
 
-    /* 关键：同步转 base64 */
-    const base64 = await new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload  = () => resolve(reader.result.split(',')[1]);
-      reader.onerror = reject;
-      reader.readAsDataURL(blob);
-    });
+    /* 关键修改：直接获取二进制 ArrayBuffer，不转 Base64 */
+    const audioBuffer = await blob.arrayBuffer();
 
-    /* 缓存两样东西 */
+    /* 缓存数据 */
     this.readState.audioChunks[idx] = {
       url,                       // 本地播放用
       expressions: chunk_expressions,
-      base64: `data:${blob.type};base64,${base64}`, // VRM 播放用
+      buffer: audioBuffer,       // VRM 二进制播放用
+      mimeType: blob.type,       // 记录真实格式
       text: chunk_text,
       idx,
       voice
@@ -13281,7 +13300,7 @@ async synthSegment(idx) {
     console.error(`TTS chunk ${idx} error`, e);
     this.readState.audioChunks[idx] = { 
       url: null, 
-      base64: null,
+      buffer: null,
       expressions: [],
       text: "",
       idx 
@@ -13303,10 +13322,17 @@ scrollToCurrentChunk(idx) {
 },
 
 async doPlayAudio(url, idx, continuous = false) {
+  // 1. 安全地清理上一段音频
   if (this._curAudio) {
+    // 只有在音频被强行打断（还没播完/没暂停）时，才通知 VRM 停止。自然播完不发！
+    const isActuallyPlaying = !this._curAudio.paused && !this._curAudio.ended;
     this._curAudio.pause();
-    this.sendTTSStatusToVRM('stopSpeaking', {});
+    if (isActuallyPlaying) {
+      this.sendTTSStatusToVRM('stopSpeaking', {});
+    }
+    this._curAudio = null;
   }
+
   try {
     const audio = new Audio(url);
     this._curAudio = audio;
@@ -13315,66 +13341,104 @@ async doPlayAudio(url, idx, continuous = false) {
     this.scrollToCurrentChunk(idx);
 
     const chunk = this.readState.audioChunks[idx];
-    if (chunk.base64 == null) throw new Error('No base64');
+
+    // 2. 防止二进制被底层消耗导致二次点击没声音
+    if (!chunk.buffer || chunk.buffer.byteLength === 0) {
+        if (chunk.url) {
+            try {
+                const res = await fetch(chunk.url);
+                chunk.buffer = await res.arrayBuffer();
+                if (!chunk.mimeType) chunk.mimeType = res.headers.get('content-type') || 'audio/wav';
+            } catch(e) {
+                console.warn("Failed to restore buffer", e);
+            }
+        }
+    }
+
+    // 3. ★ 核心修复：获取专属的 VRM 虚拟序号
+    if (this.readState.vrmIndex === undefined) {
+        this.readState.vrmIndex = 0;
+    }
+    const currentVrmIndex = this.readState.vrmIndex;
+
+    // 4. 发送纯二进制数据到 VRM (使用虚拟序号)
+    if ((this.vrmOnline || this.vtsOnline) && chunk.buffer && chunk.buffer.byteLength > 0) {
+        const metadata = {
+            type: 'audio_chunk',
+            chunkIndex: currentVrmIndex, // <--- 使用虚拟序号
+            text: chunk.text,
+            expressions: chunk.expressions,
+            mimeType: chunk.mimeType || 'audio/wav'
+        };
+        this.sendBinaryToVRM(metadata, chunk.buffer.slice(0));
+    }
+
     this._curAudio.volume = this.vrmOnline ? 0.0000001 : 1; // VRM在线时静音
+
+    // 5. 仅发送状态指令 (使用虚拟序号)
     this.sendTTSStatusToVRM('startSpeaking', {
-      audioDataUrl: chunk.base64,
-      chunkIndex: idx,
+      chunkIndex: currentVrmIndex, // <--- 使用虚拟序号
       totalChunks: this.readState.ttsChunks.length,
       text: chunk.text,
       expressions: chunk.expressions || [],
       voice: this.readState.chunks_voice[idx] || 'default',
     });
 
+    // 6. ★ 序号递增，为连播下一句准备完美的 0,1,2 顺位
+    this.readState.vrmIndex++;
+
     // 监听错误事件
     audio.addEventListener('error', (e) => {
       console.error('Audio load error', e);
       this.readState.currentChunk++;
-      if (this.readState.currentChunk < this.readState.ttsChunks.length) {
+      if (this.readState.currentChunk < this.readState.ttsChunks.length && continuous) {
         this.playNextInQueue(true);
       } else {
-        this.stopSegmentTTS();
+        this.stopSegmentTTS(false);
       }
     });
 
     await new Promise(resolve => {
       this._curAudio.addEventListener('ended', () => {
-        this.sendTTSStatusToVRM('chunkEnded', { chunkIndex: idx });
+        // 使用同样的虚拟序号通知结束
+        this.sendTTSStatusToVRM('chunkEnded', { chunkIndex: currentVrmIndex });
+        
         if (continuous && this.readState.isPlaying) {
           this.readState.currentChunk++;
           if (this.readState.currentChunk < this.readState.ttsChunks.length) {
             this.playNextInQueue(true);
           } else {
-            this.stopSegmentTTS();
+            this.stopSegmentTTS(false);
           }
         } else {
-          this.stopSegmentTTS(isEnd = false);
+          this.stopSegmentTTS(false);
         }
         resolve();
       });
+      
       console.log('play audio', `${idx + 1}`);
       audio.play().catch(e => {
         console.error('Audio play error', e);
         this.readState.currentChunk++;
-        if (this.readState.currentChunk < this.readState.ttsChunks.length) {
+        if (this.readState.currentChunk < this.readState.ttsChunks.length && continuous) {
           this.playNextInQueue(true);
         } else {
-          this.stopSegmentTTS();
+          this.stopSegmentTTS(false);
         }
-        resolve(); // 确保 Promise 被 resolve
+        resolve(); 
       });
     });
   } catch (e) {
     console.error('Read playback error', e);
     this.readState.currentChunk++;
-    if (this.readState.currentChunk < this.readState.ttsChunks.length) {
+    if (this.readState.currentChunk < this.readState.ttsChunks.length && continuous) {
       this.playNextInQueue(true);
     } else {
-      this.stopSegmentTTS();
+      this.stopSegmentTTS(false);
     }
   } finally {
       this.isReadingOnetext = false;
-    }
+  }
 },
 
 // 连续播放专用：自动合成&播放下一帧
@@ -13384,10 +13448,10 @@ async playNextInQueue(continuous) {
   const voice = this.readState.chunks_voice[idx];
   const cachedAudio = this.readState.audioChunks[idx];
 
-  // 检查缓存是否命中
-  if (cachedAudio?.url && cachedAudio?.base64 && cachedAudio?.text === chunk && cachedAudio?.voice === voice) {
+  // --- 核心修复：将 base64 改为 buffer ---
+  if (cachedAudio?.url && cachedAudio?.buffer && cachedAudio?.text === chunk && cachedAudio?.voice === voice) {
     // 命中就无事发生
-  }else{
+  } else {
     await this.synthSegment(idx);
   }
   this.doPlayAudio(this.readState.audioChunks[idx].url, idx, continuous);
