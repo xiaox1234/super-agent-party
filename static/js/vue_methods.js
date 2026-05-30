@@ -3124,19 +3124,29 @@ let vue_methods = {
         const toolName = data?.tool_name || 'Tool';
         const blockId = `approval-${toolCallId}`;
 
-        // 【修复1】：用变量直接缓存找到的目标块的引用，不再二次查找
-        let targetBlock = null;
+        // ✨【优化点2】：不直接修改 targetBlock 属性，而是定位索引并生成新对象替换
+        let targetIdx = -1;
         if (currentMsg.displayBlocks) {
-            // 严格限定不仅 id 要匹配，而且必须是我们初始的 approval 块
-            targetBlock = currentMsg.displayBlocks.find(b => b.id === toolCallId && b.type === 'approval');
-            if (targetBlock) {
-                targetBlock.type = 'tool_result';
-                targetBlock.name = action === 'deny' ? this.t('denying') : `${this.t('executing')} ${toolName}...`;
-                targetBlock.content = ''; 
+            targetIdx = currentMsg.displayBlocks.findIndex(b => b.id === toolCallId && b.type === 'approval');
+            if (targetIdx !== -1) {
+                const originalBlock = currentMsg.displayBlocks[targetIdx];
+                const updatedBlock = {
+                    ...originalBlock,
+                    type: 'tool_result',
+                    name: action === 'deny' ? this.t('denying') : `${this.t('executing')} ${toolName}...`,
+                    content: '',
+                    segments: [] // 预留 segments 缓存
+                };
+                
+                // 安全替换，绕过 Object.freeze 限制并确保响应式
+                if (typeof this.$set === 'function') {
+                    this.$set(currentMsg.displayBlocks, targetIdx, updatedBlock);
+                } else {
+                    currentMsg.displayBlocks[targetIdx] = updatedBlock;
+                }
             }
         }
 
-        // 【修复2】：补充定义转义方法，避免 this.escapeHtml 报错崩溃
         const escapeHtml = (text) => {
             if (!text) return '';
             return String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -3156,34 +3166,35 @@ let vue_methods = {
             } else {
                 resultText = await this.executeToolBackend(toolName, data.tool_params, action);
 
-                // 1. UI 显示：处理 \r 确保显示正常（比如手动执行了带进度条的脚本）
-                if (targetBlock) {
-                    targetBlock.type = action === 'deny' ? 'error' : 'tool_result';
-                    targetBlock.name = action === 'deny' ? this.t('tool_deny') : `${toolName} ${this.t('tool_result')}`;
-                    targetBlock.content = this.smartMergeTerminal('', resultText); 
+                // 更新结果内容
+                if (targetIdx !== -1) {
+                    const finalBlock = {
+                        ...currentMsg.displayBlocks[targetIdx],
+                        type: action === 'deny' ? 'error' : 'tool_result',
+                        name: action === 'deny' ? this.t('tool_deny') : `${toolName} ${this.t('tool_result')}`,
+                        content: resultText,
+                        segments: [] 
+                    };
+                    if (typeof this.$set === 'function') {
+                        this.$set(currentMsg.displayBlocks, targetIdx, finalBlock);
+                    } else {
+                        currentMsg.displayBlocks[targetIdx] = finalBlock;
+                    }
                 }
 
-                // 2. AI 历史：直接存入清理后的版本
                 const cleanedForAI = this.truncateForAI(resultText);
-
                 if (currentMsg.backend_content) {
                     for (let i = currentMsg.backend_content.length - 1; i >= 0; i--) {
                         const item = currentMsg.backend_content[i];
                         if (item.role === 'tool' && item.tool_call_id === toolCallId) {
-                            item.content = cleanedForAI; // 存入截断版给 AI
+                            item.content = cleanedForAI;
                             break;
                         }
                     }
                 } 
             }
 
-            // 【修复1】：直接使用缓存的对象修改，不会影响到同 id 的 tool_call 块
-            if (targetBlock) {
-                targetBlock.type = action === 'deny' ? 'error' : 'tool_result';
-                targetBlock.name = action === 'deny' ? this.t('tool_deny') : `${toolName} ${this.t('tool_result')}`;
-                targetBlock.content = resultText;
-            }
-
+            // 更新 HTML 部分作为兼容备份
             const blockClass = action === 'deny' ? 'type-error' : 'type-result';
             const iconClass = action === 'deny' ? 'fa-xmark' : 'fa-check';
             const finalTitle = action === 'deny' ? this.t('tool_deny') : `${toolName} ${this.t('tool_result')}`;
@@ -3194,22 +3205,10 @@ let vue_methods = {
             </div>\n`;
             this.updateUIBlock(currentMsg, blockId, resultHtml);
 
-            if (currentMsg.backend_content) {
-                for (let i = currentMsg.backend_content.length - 1; i >= 0; i--) {
-                    const item = currentMsg.backend_content[i];
-                    if (item.role === 'tool' && item.tool_call_id === toolCallId) {
-                        item.content = resultText;
-                        break;
-                    }
-                }
-            }
-            
-            // 成功走到这里，大模型才会被重新唤醒
             await this.generateAIResponse(this.mainAgent, currentMsg.agentName, true);
 
         } catch (e) {
             console.error("Approval flow failed:", e);
-            // 兼容性判断，防止 showNotification 在其他环境也没有定义而二次崩溃
             if (typeof showNotification === 'function') {
                 showNotification("Tool execution failed", 'error');
             }
@@ -3303,12 +3302,17 @@ let vue_methods = {
             const block = this.getBlockForMsg(this._streamTargetMsg, 'text');
             if (block) {
                 block.content += this._streamTextBuffer;
-                // 同时更新 pure_content 和 content 纯文本（不再拼 HTML）
+                
+                // ✨【优化点1】：在 JS 层直接预先解析 segments 并存入 block，避免模板重复计算
+                block.segments = this.splitMessageContent(block.content);
+                
                 this._streamTargetMsg.pure_content += this._streamTextBuffer;
                 this._streamTargetMsg.content += this._streamTextBuffer;
+                
+                // 为旧架构兼容也做一份预解析缓存
+                this._streamTargetMsg.segments = this.splitMessageContent(this._streamTargetMsg.content);
             }
             this._streamTextBuffer = '';
-            // 触发滚动（节流版）
             this.requestScrollToBottom();
         }
     },
