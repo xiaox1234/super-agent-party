@@ -317,6 +317,9 @@ chmod +x 一键更新(update).sh 一键启动(start).sh
   <img src="doc/image/star.gif" width="400" alt="star">
 </div>
 
+### 投げ銭をお願いします！
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/agentparty)
+
 ### フォローしてください
 <div align="center">
   <a href="https://space.bilibili.com/26978344">
