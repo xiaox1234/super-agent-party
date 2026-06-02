@@ -1144,8 +1144,10 @@ async def dispatch_tool(tool_name: str, tool_params: dict, settings: dict,is_sub
         keyboard_sequence,
         keyboard_hotkey,
         keyboard_hold,
+        logical_type,
         wait,
-        screenshot
+        screenshot,
+        logical_click,
     )
 
     from py.mode_change import update_workspace_settings
@@ -1255,8 +1257,10 @@ async def dispatch_tool(tool_name: str, tool_params: dict, settings: dict,is_sub
         "keyboard_sequence":keyboard_sequence,
         "keyboard_hotkey":keyboard_hotkey,
         "keyboard_hold":keyboard_hold,
+        "logical_type":logical_type,
         "wait":wait,
         "screenshot":screenshot,
+        "logical_click":logical_click,
 
         "update_workspace_settings":update_workspace_settings,
         "acpx_agent":acpx_agent,
@@ -3114,10 +3118,10 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
         if should_capture:
             try:
                 import pyautogui
-                # 引入我们刚才写的设置区域的方法
                 from py.computer_use_tool import set_screen_region
+                # 引入我们刚刚编写的跨平台 UI 树抓取工具
+                from py.ui_tree_helper import get_desktop_ui_tree
                 
-                # 获取配置
                 v_settings = settings.get('visionControlSettings', {})
                 is_full_screen = v_settings.get('isFullScreen', True)
                 screen_size = v_settings.get('ScreenSize', [0, 0, 1280, 720])
@@ -3125,19 +3129,22 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
 
                 print(f"正在执行桌面截图 (全屏: {is_full_screen}, 网格: {is_grid_enabled})...")
                 
+                # 初始化截图偏移量
+                offset_x, offset_y = 0, 0
+                
                 # 1. 根据全屏配置决定截取范围，并同步给鼠标工具
                 if not is_full_screen and len(screen_size) == 4:
                     x, y, w, h = map(int, screen_size)
+                    offset_x, offset_y = x, y  # 设定偏移量，用于对齐 UI 树坐标
+                    
                     # 截取指定区域
                     screenshot = await asyncio.to_thread(pyautogui.screenshot, region=(x, y, w, h))
                     logical_width, logical_height = w, h
-                    # 通知计算机工具，接下来的鼠标操作要基于这个区域
                     set_screen_region((x, y, w, h))
                 else:
                     # 全屏截图
                     logical_width, logical_height = pyautogui.size()
                     screenshot = await asyncio.to_thread(pyautogui.screenshot)
-                    # 恢复全屏鼠标映射
                     set_screen_region(None)
                 
                 # 2. 统一缩放到逻辑坐标系 (解决 Windows DPI 缩放偏移)
@@ -3146,26 +3153,33 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                         screenshot.resize, (logical_width, logical_height), Image.Resampling.LANCZOS
                     )
                 
-                # 3. 缩放到传输尺寸 (1280x720 左右，平衡清晰度与 Token 消耗)
+                # 3. 缩放到传输尺寸 (1280x720 左右)
                 target_w, target_h = scale_to_fit(logical_width, logical_height, 1280, 720)
-                
                 if screenshot.width > target_w or screenshot.height > target_h:
                     print(f"检测到高分辨率屏幕，正在从 {screenshot.size} 缩放到 {(target_w, target_h)}")
                     screenshot = await asyncio.to_thread(
                         screenshot.resize, (target_w, target_h), Image.Resampling.LANCZOS
                     )
 
-                # 4. 根据设置决定是否绘制网格
+                # 4. 根据设置决定是否绘制网格，并生成网格提示
                 if is_grid_enabled:
-                    # 在副本上绘制网格
                     display_image = await asyncio.to_thread(draw_grid_on_image, screenshot.copy(), grid_spacing=10)
-                    if not is_full_screen:
-                        grid_hint = "\n\n【system info】Current partial screen region screenshot with coordinate grid (0-1000) is injected. Use coordinates for precise clicking."
-                    else:
-                        grid_hint = "\n\n【system info】Current desktop screenshot with coordinate grid (0-1000) is injected. Use coordinates for precise clicking."
+                    grid_hint = "\n\n【system info】Current screenshot with coordinate grid (0-1000) is injected. Use coordinates for precise clicking."
                 else:
                     display_image = screenshot
                     grid_hint = "\n\n【system info】Current desktop screenshot is injected."
+
+                ui_tree_hint = ""
+                if vision_control_enabled:
+                    print("正在异步提取跨平台无障碍 UI 树并进行 0-1000 坐标对齐...")
+                    # 传入逻辑视口尺寸 (logical_width, logical_height) 和 偏移量 (offset_x, offset_y)
+                    ui_tree_json = await get_desktop_ui_tree(
+                        logical_width=logical_width,
+                        logical_height=logical_height,
+                        offset_x=offset_x,
+                        offset_y=offset_y
+                    )
+                    ui_tree_hint = f"\n\n【system info】Current Interactive UI Elements (Index of clickable items on screen with 0-1000 grid):\n```json\n{ui_tree_json}\n```\nYou can click any element using the provided [center_x, center_y] coordinates (which correspond perfectly to your 0-1000 grid input)."
 
                 # 5. 保存图片
                 file_prefix = "desktop_grid" if is_grid_enabled else "desktop_plain"
@@ -3175,36 +3189,50 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                 await asyncio.to_thread(display_image.save, desktop_img_path, optimize=True)
                 desktop_url = f"{fastapi_base_url}uploaded_files/{desktop_img_name}"
                 
-                # 6. 注入到当前消息
+                # ==========================================
+                # 6. 注入到当前消息最后（完美兼容文本与多模态列表消息）
+                # ==========================================
                 current_user_msg = request.messages[-1]
+                full_hint = grid_hint + ui_tree_hint  # 将图片提示和 UI 树结合起来
+
                 if isinstance(current_user_msg['content'], str):
                     original_text = current_user_msg['content']
                     current_user_msg['content'] = [
-                        {"type": "text", "text": original_text + grid_hint},
+                        {"type": "text", "text": original_text + full_hint},
                         {"type": "image_url", "image_url": {"url": desktop_url}}
                     ]
                 elif isinstance(current_user_msg['content'], list):
+                    # 如果已经是多模态列表，寻找其中的 text 节点并将 UI 树追加在末尾
+                    text_updated = False
+                    for item in current_user_msg['content']:
+                        if item.get('type') == 'text':
+                            item['text'] = item['text'] + full_hint
+                            text_updated = True
+                            break
+                    if not text_updated:
+                        # 如果没有 text 节点，手动追加一个 text 节点
+                        current_user_msg['content'].append({"type": "text", "text": full_hint})
+                        
+                    # 最后追加截图
                     current_user_msg['content'].append(
                         {"type": "image_url", "image_url": {"url": desktop_url}}
                     )
                 
                 # 7. 清理历史截图 (如果开启了 onlyNewScreen)
                 if settings.get('visionControlSettings', {}).get('onlyNewScreen', False):
-                    for msg in request.messages[:-1]: # 不处理最后一条刚刚添加的消息
+                    for msg in request.messages[:-1]:
                         if isinstance(msg.get('content'), list):
-                            # 过滤掉 image_url，只保留 text
                             new_content = [item for item in msg['content'] if item.get('type') != 'image_url']
-                            # 如果 list 里只剩文本，简化为字符串提高处理效率
                             if len(new_content) == 1 and new_content[0].get('type') == 'text':
                                 msg['content'] = new_content[0]['text']
                             else:
                                 msg['content'] = new_content
                     print("已清理历史上下文中的旧截图。")
 
-                print(f"桌面截图已注入: {desktop_url}")
+                print(f"桌面截图与精简 UI 树已成功合并注入: {desktop_url}")
 
             except Exception as e:
-                print(f"后端桌面截图失败: {e}")
+                print(f"后端桌面截图或 UI 树提取失败: {e}")
 
         # =========================================================================
         # 第一阶段：上下文压缩 (仅在达到阈值时触发，决定“保留哪些消息”)
@@ -4948,6 +4976,8 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                             import pyautogui
                             # 必须从你的工具类中引入设置区域的方法
                             from py.computer_use_tool import set_screen_region
+                            # 引入编写好的跨平台 UI 树抓取工具
+                            from py.ui_tree_helper import get_desktop_ui_tree
                             
                             v_settings = settings.get('visionControlSettings', {})
                             is_grid_enabled = v_settings.get('isEnableGrid', False)
@@ -4957,10 +4987,15 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                             time.sleep(0.5) # 等待一下，确保截图工具已经准备好
                             print(f"正在执行桌面截图 (全屏: {is_full_screen}, 网格: {is_grid_enabled})...")
                             
+                            # 初始化坐标偏移量
+                            offset_x, offset_y = 0, 0
+                            
                             # --- 1. 区域判定与捕获 ---
                             if not is_full_screen and len(screen_size) == 4:
                                 # 局部截图模式
                                 rx, ry, rw, rh = map(int, screen_size)
+                                offset_x, offset_y = rx, ry  # 记录局部截图的左上角坐标偏移
+                                
                                 # 关键：告诉鼠标工具，接下来的 0-1000 坐标要映射到这个局部矩形
                                 set_screen_region((rx, ry, rw, rh))
                                 
@@ -5006,7 +5041,19 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                             else:
                                 display_image = screenshot
                                 grid_hint = f"\n\n【system info】Current screenshot injected.\n{action_feedback_hint}"
-                            
+
+                            ui_tree_hint = ""
+                            if vision_control_enabled:
+                                print("正在异步提取跨平台无障碍 UI 树并进行 0-1000 坐标对齐...")
+                                # 传入逻辑视口尺寸 (logical_width, logical_height) 和 偏移量 (offset_x, offset_y)
+                                ui_tree_json = await get_desktop_ui_tree(
+                                    logical_width=logical_width,
+                                    logical_height=logical_height,
+                                    offset_x=offset_x,
+                                    offset_y=offset_y
+                                )
+                                ui_tree_hint = f"\n\n【system info】Current Interactive UI Elements (Index of clickable items on screen with 0-1000 grid):\n```json\n{ui_tree_json}\n```\nYou can click any element using the provided [center_x, center_y] coordinates (which correspond perfectly to your 0-1000 grid input)."
+
                             # --- 5. 保存并注入消息 ---
                             desktop_img_name = f"desktop_view_{uuid.uuid4().hex}.png"
                             desktop_img_path = os.path.join(UPLOAD_FILES_DIR, desktop_img_name)
@@ -5014,10 +5061,11 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                             
                             desktop_url = f"{fastapi_base_url}uploaded_files/{desktop_img_name}"
                             
+                            # 将 grid_hint 与 ui_tree_hint 合并到消息的文本节点中
                             current_user_msg = {
                                 "role": "user",
                                 "content": [
-                                    {"type": "text", "text": '[Getting screenshot]' + grid_hint},
+                                    {"type": "text", "text": '[Getting screenshot]' + grid_hint + ui_tree_hint},
                                     {"type": "image_url", "image_url": {"url": desktop_url}}
                                 ]
                             }
@@ -5034,7 +5082,7 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                                             msg['content'] = ""
 
                         except Exception as e:
-                            print(f"后端桌面截图失败: {e}")
+                            print(f"后端桌面截图或获取 UI 树失败: {e}")
                             
                         images = await images_in_messages(request.messages, fastapi_base_url)
                         request.messages = await message_without_images(request.messages)
@@ -6607,8 +6655,10 @@ async def execute_tool_manually(request: Request):
         keyboard_sequence,
         keyboard_hotkey,
         keyboard_hold,
+        logical_type,
         wait,
-        screenshot
+        screenshot,
+        logical_click,
     )
 
     from py.mode_change import update_workspace_settings
@@ -6718,8 +6768,10 @@ async def execute_tool_manually(request: Request):
         "keyboard_sequence":keyboard_sequence,
         "keyboard_hotkey":keyboard_hotkey,
         "keyboard_hold":keyboard_hold,
+        "logical_type":logical_type,
         "wait":wait,
         "screenshot":screenshot,
+        "logical_click":logical_click,
 
         "update_workspace_settings":update_workspace_settings,
         "acpx_agent":acpx_agent,

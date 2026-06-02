@@ -349,6 +349,10 @@ docker-compose -f docker-compose-acr.yml up -d
   <img src="doc/image/star.gif" width="400" alt="star">
 </div>
 
+### 求打赏！
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/agentparty)
+
+
 ### 关注我们
 <div align="center">
   <a href="https://space.bilibili.com/26978344">

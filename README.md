@@ -346,6 +346,9 @@ We extend our gratitude to all contributors of the third-party libraries and com
   <img src="doc/image/star.gif" width="400" alt="star">
 </div>
 
+### Tips Welcome!
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/agentparty)
+
 ### Follow us
 <div align="center">
   <a href="https://space.bilibili.com/26978344">
