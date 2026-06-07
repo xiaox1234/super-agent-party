@@ -1150,24 +1150,24 @@ function updateElement(el, rawMarkdown, formatFn) {
                  
                   <!-- 添加 is-group-mode 类 -->
                   <div v-for="(message, index) in messages" :key="index" class="message" 
-                    :class="[message.role, { 'is-group-mode': isGroupMode }]"
+                    :class="[message.role, { 'is-group-mode': isGroupMode || systemSettings.chatMode === 'entertainment' }]"
                     v-show="!(message.role === 'system' && systemSettings.chatMode === 'entertainment')">
                     
-                    <!-- 群聊模式 - AI 头像 (左侧) -->
-                    <div v-if="isGroupMode && message.role === 'assistant' && message.agentName" class="im-avatar left">
-                      <img :src="getRoleAvatar(message.agentName)" draggable="false" />
+                    <!-- 群聊与娱乐模式 - AI 头像 (左侧) -->
+                    <div v-if="(isGroupMode || systemSettings.chatMode === 'entertainment') && message.role === 'assistant' && getMessageAgentName(message)" class="im-avatar left">
+                      <img :src="getRoleAvatar(getMessageAgentName(message))" draggable="false" />
                     </div>
-
+                    
                     <!-- 内容包裹层：负责纵向排列 名字、气泡、按钮 -->
                     <div class="im-content-wrapper">
                       
-                      <!-- AI 名字 (仅群聊显示) -->
-                      <div v-if="(isGroupMode && message.agentName) && message.role === 'assistant'" class="im-name-tag">
-                          {{ message.agentName }}
+                      <!-- AI 名字 (仅群聊/娱乐模式显示) -->
+                      <div v-if="(isGroupMode || systemSettings.chatMode === 'entertainment') && getMessageAgentName(message) && message.role === 'assistant'" class="im-name-tag">
+                          {{ getMessageAgentName(message) }}
                       </div>
 
                       <!-- TTS 控制区 -->
-                      <div v-if="(ttsSettings.enabled || settings.enableOmniTTS || fastSettings.enableOmniTTS) && message.role === 'assistant'" class="tts-controls">
+                      <div v-if="(ttsSettings.enabled || settings.enableOmniTTS || fastSettings.enableOmniTTS) && message.role === 'assistant' && systemSettings.chatMode !== 'entertainment'" class="tts-controls">
                         <el-tooltip :content="message.isPlaying ? t('pause') : t('play')">
                           <el-button @click="toggleTTS(message)" circle size="small">
                             <i :class="message.isPlaying ? 'fa-solid fa-pause' : 'fa-solid fa-play'"></i>
@@ -1205,7 +1205,7 @@ function updateElement(el, rawMarkdown, formatFn) {
                           v-if="!allBriefly||message.role !== 'system'||index === 0" 
                           :class="{ 
                               typing: message.role === 'assistant' && isTyping && index === messages.length - 1,
-                              'mode-entertainment': (message.role === 'assistant' || message.role === 'system') && systemSettings.chatMode === 'entertainment',
+                              'mode-entertainment': systemSettings.chatMode === 'entertainment',
                               'mode-work': (message.role === 'assistant' || message.role === 'system') && systemSettings.chatMode === 'work'
                           }">
                         
@@ -1349,8 +1349,13 @@ function updateElement(el, rawMarkdown, formatFn) {
 
                       </div>
 
+                      <!-- ✨ 娱乐模式专属：消息发送时间戳 -->
+                      <div v-if="systemSettings.chatMode === 'entertainment' && formatMessageTime(message.timestamp, message.id)" class="im-time-stamp" :class="message.role">
+                        {{ formatMessageTime(message.timestamp, message.id) }}
+                      </div>
+
                       <!-- 操作按钮区 -->
-                      <div class="message-actions" v-if="!allBriefly||message.role !== 'system'||index === 0">
+                      <div class="message-actions" v-if="(!allBriefly||message.role !== 'system'||index === 0) && systemSettings.chatMode !== 'entertainment'">
                         <el-tooltip v-if="message.role !== 'assistant'" :content="t('edit')" placement="bottom">
                           <el-button @click="openEditDialog(message.role, message.content,index)" circle size="small"><i class="fa-solid fa-pen-to-square"></i></el-button>
                         </el-tooltip>
@@ -1388,8 +1393,8 @@ function updateElement(el, rawMarkdown, formatFn) {
 
                     </div>
 
-                    <!-- 群聊模式 - 用户头像 (右侧) -->
-                    <div v-if="isGroupMode && message.role === 'user'" class="im-avatar right">
+                    <!-- 群聊与娱乐模式 - 用户头像 (右侧) -->
+                    <div v-if="(isGroupMode || systemSettings.chatMode === 'entertainment') && message.role === 'user'" class="im-avatar right">
                       <img src="source/providers/logo.png" draggable="false" />
                     </div>
 
@@ -1879,6 +1884,49 @@ function updateElement(el, rawMarkdown, formatFn) {
                             <span class="pill-text">{{ settings?.model !== '' ? settings.model : t('noModelSelected') }}</span>
                           </div>
                         </el-tooltip>
+
+                        <el-dropdown 
+                          placement="top" 
+                          trigger="click"
+                          class="status-pill-dropdown"
+                        >
+                          <div class="status-pill">
+                            <el-tooltip :content="t('chatUIMode') || '聊天模式'" placement="top" :show-after="500">
+                              <span style="display: inline-flex; align-items: center; gap: 6px;">
+                                <i :class="{
+                                  'fa-solid fa-bolt': systemSettings.chatMode === 'standard',
+                                  'fa-solid fa-face-smile': systemSettings.chatMode === 'entertainment',
+                                  'fa-solid fa-gem': systemSettings.chatMode === 'work'
+                                }"></i>
+                                <span class="pill-text">
+                                  {{ 
+                                    systemSettings.chatMode === 'standard' ? (t('chatUIStandard') || '经典模式') : 
+                                    systemSettings.chatMode === 'entertainment' ? (t('chatUIEntertainment') || '娱乐模式') : 
+                                    (t('chatUIWork') || '办公模式') 
+                                  }}
+                                </span>
+                              </span>
+                            </el-tooltip>
+                          </div>
+                          
+                          <template #dropdown>
+                            <el-dropdown-menu>
+                              <el-dropdown-item @click="systemSettings.chatMode = 'standard'; autoSaveSettings()">
+                                <i class="fa-solid fa-bolt" style="margin-right: 6px;"></i>
+                                {{ t('chatUIStandard') || '经典模式' }}
+                              </el-dropdown-item>
+                              <el-dropdown-item @click="systemSettings.chatMode = 'entertainment'; autoSaveSettings()">
+                                <i class="fa-solid fa-face-smile" style="margin-right: 6px;"></i>
+                                {{ t('chatUIEntertainment') || '娱乐模式' }}
+                              </el-dropdown-item>
+                              <el-dropdown-item @click="systemSettings.chatMode = 'work'; autoSaveSettings()">
+                                <i class="fa-solid fa-gem" style="margin-right: 6px;"></i>
+                                {{ t('chatUIWork') || '办公模式' }}
+                              </el-dropdown-item>
+                            </el-dropdown-menu>
+                          </template>
+                        </el-dropdown>
+
                         <el-tooltip
                           v-if="!isAssistantMode && !isMobile && currentViewName"
                           :content="t('clickToSwitchExtensions')"
@@ -17208,24 +17256,24 @@ function updateElement(el, rawMarkdown, formatFn) {
                  
                   <!-- 添加 is-group-mode 类 -->
                   <div v-for="(message, index) in messages" :key="index" class="message" 
-                    :class="[message.role, { 'is-group-mode': isGroupMode }]"
+                    :class="[message.role, { 'is-group-mode': isGroupMode || systemSettings.chatMode === 'entertainment' }]"
                     v-show="!(message.role === 'system' && systemSettings.chatMode === 'entertainment')">
                     
-                    <!-- 群聊模式 - AI 头像 (左侧) -->
-                    <div v-if="isGroupMode && message.role === 'assistant' && message.agentName" class="im-avatar left">
-                      <img :src="getRoleAvatar(message.agentName)" draggable="false" />
+                    <!-- 群聊与娱乐模式 - AI 头像 (左侧) -->
+                    <div v-if="(isGroupMode || systemSettings.chatMode === 'entertainment') && message.role === 'assistant' && getMessageAgentName(message)" class="im-avatar left">
+                      <img :src="getRoleAvatar(getMessageAgentName(message))" draggable="false" />
                     </div>
 
                     <!-- 内容包裹层：负责纵向排列 名字、气泡、按钮 -->
                     <div class="im-content-wrapper">
                       
-                      <!-- AI 名字 (仅群聊显示) -->
-                      <div v-if="(isGroupMode && message.agentName) && message.role === 'assistant'" class="im-name-tag">
+                      <!-- AI 名字 (仅群聊/娱乐模式显示) -->
+                      <div v-if="(isGroupMode || systemSettings.chatMode === 'entertainment') && message.agentName && message.role === 'assistant'" class="im-name-tag">
                           {{ message.agentName }}
                       </div>
 
                       <!-- TTS 控制区 -->
-                      <div v-if="(ttsSettings.enabled || settings.enableOmniTTS || fastSettings.enableOmniTTS) && message.role === 'assistant'" class="tts-controls">
+                      <div v-if="(ttsSettings.enabled || settings.enableOmniTTS || fastSettings.enableOmniTTS) && message.role === 'assistant' && systemSettings.chatMode !== 'entertainment'" class="tts-controls">
                         <el-tooltip :content="message.isPlaying ? t('pause') : t('play')">
                           <el-button @click="toggleTTS(message)" circle size="small">
                             <i :class="message.isPlaying ? 'fa-solid fa-pause' : 'fa-solid fa-play'"></i>
@@ -17263,7 +17311,7 @@ function updateElement(el, rawMarkdown, formatFn) {
                           v-if="!allBriefly||message.role !== 'system'||index === 0" 
                           :class="{ 
                               typing: message.role === 'assistant' && isTyping && index === messages.length - 1,
-                              'mode-entertainment': (message.role === 'assistant' || message.role === 'system') && systemSettings.chatMode === 'entertainment',
+                              'mode-entertainment': systemSettings.chatMode === 'entertainment',
                               'mode-work': (message.role === 'assistant' || message.role === 'system') && systemSettings.chatMode === 'work'
                           }">
                         
@@ -17407,8 +17455,13 @@ function updateElement(el, rawMarkdown, formatFn) {
 
                       </div>
 
+                      <!-- ✨ 娱乐模式专属：消息发送时间戳 -->
+                      <div v-if="systemSettings.chatMode === 'entertainment' && formatMessageTime(message.timestamp, message.id)" class="im-time-stamp" :class="message.role">
+                        {{ formatMessageTime(message.timestamp, message.id) }}
+                      </div>
+
                       <!-- 操作按钮区 -->
-                      <div class="message-actions" v-if="!allBriefly||message.role !== 'system'||index === 0">
+                      <div class="message-actions" v-if="(!allBriefly||message.role !== 'system'||index === 0) && systemSettings.chatMode !== 'entertainment'">
                         <el-tooltip v-if="message.role !== 'assistant'" :content="t('edit')" placement="bottom">
                           <el-button @click="openEditDialog(message.role, message.content,index)" circle size="small"><i class="fa-solid fa-pen-to-square"></i></el-button>
                         </el-tooltip>
@@ -17446,8 +17499,8 @@ function updateElement(el, rawMarkdown, formatFn) {
 
                     </div>
 
-                    <!-- 群聊模式 - 用户头像 (右侧) -->
-                    <div v-if="isGroupMode && message.role === 'user'" class="im-avatar right">
+                    <!-- 群聊与娱乐模式 - 用户头像 (右侧) -->
+                    <div v-if="(isGroupMode || systemSettings.chatMode === 'entertainment') && message.role === 'user'" class="im-avatar right">
                       <img src="source/providers/logo.png" draggable="false" />
                     </div>
 

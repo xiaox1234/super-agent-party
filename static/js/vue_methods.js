@@ -1252,18 +1252,25 @@ let vue_methods = {
           let formatted = part.content;
 
           // ============================================================
-          // 【新增】娱乐模式下：单换行符（\n）转换为双换行符（\n\n）
-          // 使用负向断言（Lookbehind & Lookahead）确保不重复影响已有的双换行符
+          // 娱乐模式下：单换行符（\n）转换为双换行符（\n\n）
           // ============================================================
           if (this.systemSettings && this.systemSettings.chatMode === 'entertainment') {
             formatted = formatted.replace(/(?<!\n)\n(?!\n)/g, '\n\n');
           }
 
           // ============================================================
+          // 【新增】图片强制分离逻辑
+          // 匹配文本中的图片（包含可能有 `<silence>` 包裹的情况），强行在其前后注入双换行符
+          // ============================================================
+          formatted = formatted.replace(/(<silence>)?(!\[.*?\]\([^\)]+\))(<\/silence>)?/g, '\n\n$1$2$3\n\n');
+
+          // 收缩可能因为强行注入而产生的多余连续换行符，确保 Markdown 格式紧凑
+          formatted = formatted.replace(/\n{3,}/g, '\n\n');
+
+          // ============================================================
           // LaTeX 公式保护机制
           // 防止公式内部的 < 和 > 被后续的 HTML 标签过滤正则误杀
           // ============================================================
-          // 匹配 $$...$$ (支持跨行和流式输出未闭合) 以及 $...$ (行内公式)
           formatted = formatted.replace(/\$\$([\s\S]*?)(?:\$\$|$)|\$([^\$\n]+)\$/g, function(match) {
             return match.replace(/</g, '\\lt ').replace(/>/g, '\\gt ');
           });
@@ -2475,7 +2482,8 @@ let vue_methods = {
             fileLinks_content: fileLinks_content,
             imageLinks: imageLinks || [],
             hasDesktopVision: captureFlag, // ✨ 新增标记：告诉 UI 这条消息触发了后端截图
-            agentName: this.memorySettings.userName || 'User' 
+            agentName: this.memorySettings.userName || 'User',
+            timestamp: Date.now() // ✨ 记录发送时间 
         });
 
         this.sendMessagesToExtension();
@@ -2521,13 +2529,31 @@ let vue_methods = {
                         await this.generateAIResponse(targetId, agentDisplayName);
                     }
                 } else {
-                // == 单聊模式 ==
-                let currentName = 'Assistant';
-                if (this.mainAgent === 'super-model') currentName = this.t('defaultAgent');
-                else if (this.agents[this.mainAgent]) currentName = this.agents[this.mainAgent].name;
+                    // == 单聊模式 ==
+                    let currentName = 'Assistant';
 
-                await this.generateAIResponse(this.mainAgent, currentName);
-            }
+                    // 1. 判断角色卡主开关开启，且选中了具体的角色卡 ID
+                    if (this.memorySettings && this.memorySettings.is_memory && this.memorySettings.selectedMemory) {
+                        const selectedId = this.memorySettings.selectedMemory;
+                        
+                        // 确保 memories 列表存在，并采用 String 强转匹配，防止因数据类型不一致（数字 vs 字符串）导致查找失败
+                        const memRecord = this.memories && this.memories.find(m => String(m.id) === String(selectedId));
+                        if (memRecord) {
+                            currentName = memRecord.name;
+                        } else {
+                            // 降级兜底
+                            currentName = "Role";
+                        }
+                    } 
+                    // 2. 否则，展示系统当前默认选择的智能体名称
+                    else if (this.mainAgent === 'super-model') {
+                        currentName = this.t('defaultAgent');
+                    } else if (this.agents && this.agents[this.mainAgent]) {
+                        currentName = this.agents[this.mainAgent].name;
+                    }
+
+                    await this.generateAIResponse(this.mainAgent, currentName);
+                }
         } catch (e) {
             console.error("Chat dispatch error:", e);
         } finally {
@@ -2669,7 +2695,8 @@ let vue_methods = {
                 isOmni: this.settings.enableOmniTTS || this.fastSettings.enableOmniTTS,
                 omniAudioChunks: [], ttsChunks: [], chunks_voice: [], audioChunks: [],
                 isPlaying: false, total_tokens: 0, first_token_latency: 0, elapsedTime: 0,
-                generationFinished: false
+                generationFinished: false,
+                timestamp: Date.now() // ✨ 记录生成时间
             };
             this.messages.push(newMsgData);
             currentMsg = this.messages[this.messages.length - 1];
@@ -3181,6 +3208,104 @@ let vue_methods = {
             this._streamTargetMsg = null;
             this._streamTextBuffer = '';
             if (this._streamUpdateTimer) clearTimeout(this._streamUpdateTimer);
+        }
+    },
+
+    // 1. 动态安全获取消息的发送者名称
+    getMessageAgentName(message) {
+        // 如果消息体中已有记录，直接使用
+        if (message.agentName) return message.agentName;
+        
+        // 如果是助手消息但没有记录名称（常见于开场白）
+        if (message.role === 'assistant') {
+            // A. 优先尝试读取当前激活的角色卡/Memory的名称
+            if (this.memorySettings && this.memorySettings.is_memory && this.memorySettings.selectedMemory) {
+                const selectedId = this.memorySettings.selectedMemory;
+                const memRecord = this.memories && this.memories.find(m => String(m.id) === String(selectedId));
+                if (memRecord) return memRecord.name;
+            }
+            // B. 其次尝试读取默认智能体名称
+            if (this.mainAgent === 'super-model') {
+                return this.t('defaultAgent');
+            } else if (this.agents && this.agents[this.mainAgent]) {
+                return this.agents[this.mainAgent].name;
+            }
+            return 'Assistant';
+        }
+        
+        // 如果是用户消息
+        return this.memorySettings?.userName || 'User';
+    },
+
+    // 2. 动态安全解析并格式化时间戳
+    formatMessageTime(timestamp, messageId = null) {
+        let timeVal = timestamp;
+        
+        // 尝试解析唯一 message.id 作为降级时间戳
+        if (!timeVal && messageId) {
+            const idNum = parseFloat(messageId);
+            if (!isNaN(idNum) && idNum > 1000000000000) { // 验证是否为合理的毫秒级时间戳
+                timeVal = idNum;
+            }
+        }
+        
+        if (!timeVal) return ''; 
+        
+        const msgDate = new Date(timeVal);
+        const now = new Date();
+        
+        // 获取今日、昨日、前天零点的时间戳，进行精确天级对比
+        const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+        const oneDayMs = 24 * 60 * 60 * 1000;
+        const yesterdayStart = todayStart - oneDayMs;
+        const theDayBeforeStart = todayStart - 2 * oneDayMs;
+        
+        // 计算本周一零点的时间戳（以周一为一周的起点）
+        const currentDayOfWeek = now.getDay(); // 0(周日) - 6(周六)
+        const daysSinceMonday = currentDayOfWeek === 0 ? 6 : currentDayOfWeek - 1; // 转换为以周一为 0 点的偏移量
+        const thisMondayStart = todayStart - daysSinceMonday * oneDayMs;
+        
+        const msgTime = msgDate.getTime();
+        
+        // 格式化具体的时分（HH:mm）
+        const hours = String(msgDate.getHours()).padStart(2, '0');
+        const minutes = String(msgDate.getMinutes()).padStart(2, '0');
+        const timeStr = `${hours}:${minutes}`;
+        
+        // 1. 如果是今天：只显示时间，如 "17:26"
+        if (msgTime >= todayStart) {
+            return timeStr;
+        }
+        
+        // 2. 如果是昨天：读取 'yesterday' 键，显示 "昨天 17:26" / "Yesterday 17:26"
+        if (msgTime >= yesterdayStart && msgTime < todayStart) {
+            return `${this.t('yesterday')} ${timeStr}`;
+        }
+        
+        // 3. 如果是前天：读取 'theDayBefore' 键，显示 "前天 17:26" / "Day before yesterday 17:26"
+        if (msgTime >= theDayBeforeStart && msgTime < yesterdayStart) {
+            return `${this.t('theDayBefore')} ${timeStr}`;
+        }
+        
+        // 4. 如果是本周的其他时间（周一 0 点之后，但在前天 0 点之前）：读取对应的周几键，显示 "周一 17:26" / "Monday 17:26"
+        if (msgTime >= thisMondayStart && msgTime < theDayBeforeStart) {
+            const weekKeys = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+            const dayKey = weekKeys[msgDate.getDay()];
+            const dayName = this.t(dayKey);
+            return `${dayName} ${timeStr}`;
+        }
+        
+        // 5. 跨周或更久的时间：显示具体日期和时间
+        const year = msgDate.getFullYear();
+        const month = String(msgDate.getMonth() + 1).padStart(2, '0');
+        const day = String(msgDate.getDate()).padStart(2, '0');
+        
+        // 如果是本年度内的消息，隐藏年份显示，如 "06-08 17:26"
+        if (year === now.getFullYear()) {
+            return `${month}-${day} ${timeStr}`;
+        } else {
+            // 跨年消息，显示完整年份，如 "2025-06-08 17:26"
+            return `${year}-${month}-${day} ${timeStr}`;
         }
     },
 

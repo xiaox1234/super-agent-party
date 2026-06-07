@@ -13367,3 +13367,84 @@ pre.code-block {
     padding: 0 !important;
     border: none !important;
 }
+
+/* =========================================
+   标准模式与办公模式图片自适应缩放优化
+   ========================================= */
+
+/* 1. 经典/标准模式：自适应优雅缩放 */
+.message-content:not(.mode-entertainment):not(.mode-work) .markdown-body img,
+.message-content:not(.mode-entertainment):not(.mode-work) .stream-content img {
+    display: block;
+    max-width: 100% !important;        /* 宽度上限不超过消息气泡 */
+    height: auto !important;           /* 保持原有宽高比 */
+    max-height: 360px !important;      /* 限制最大高度，防止长图霸屏，保持阅读流畅 */
+    width: auto !important;            /* 允许根据比例自动收缩，防止小图/图标被强行拉大 */
+    object-fit: contain !important;
+    border-radius: 8px !important;     /* 精致的现代圆角 */
+    margin: 10px 0 !important;         /* 上下段落保留呼吸间距 */
+    box-shadow: var(--shadow-sm);      /* 轻微的环境光投影，提升质感 */
+    border: 1px solid var(--el-border-color-light) !important; /* 微弱的极细边框 */
+    transition: transform 0.2s ease;
+}
+
+/* 2. 办公模式 (Work Mode)：更严谨、更紧凑的学术/文档排版 */
+.message-content.mode-work .markdown-body img,
+.message-content.mode-work .stream-content img {
+    display: block;
+    max-width: 100% !important;
+    height: auto !important;
+    max-height: 300px !important;      /* 办公模式限制到 300px，排版更紧凑 */
+    width: auto !important;
+    object-fit: contain !important;
+    border-radius: 6px !important;     /* 更加克制的微圆角 */
+    margin: 8px 0 !important;
+    border: 1px solid var(--el-border-color-light) !important;
+}
+
+/* 3. 悬停微动反馈（双模式通用） */
+.message-content:not(.mode-entertainment) .markdown-body img:hover,
+.message-content:not(.mode-entertainment) .stream-content img:hover {
+    transform: translateY(-1px);       /* 悬停时轻微上浮 */
+    box-shadow: var(--shadow-md);      /* 投影微微加深 */
+}
+
+
+
+/* =========================================
+   娱乐模式：极简消息时间戳
+   ========================================= */
+.im-time-stamp {
+    font-size: 11px;
+    color: var(--el-text-color-secondary);
+    opacity: 0.55;
+    margin-top: 4px;
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+/* 助手时间戳靠左对齐 */
+.im-time-stamp.assistant {
+    margin-left: 4px;
+    align-self: flex-start;
+}
+
+/* 用户时间戳靠右对齐 */
+.im-time-stamp.user {
+    margin-right: 4px;
+    align-self: flex-end;
+}
+
+/* =========================================
+   娱乐模式：消除左右内边距，保留上下 8px 间距
+   ========================================= */
+.mode-entertainment .markdown-body {
+    padding: 8px 0 !important; /* 上下保留 8px 呼吸感，左右彻底归零防偏移 */
+    background: transparent !important; /* 确保容器背景彻底透明 */
+}
+
+/* 兼容处理：消除块容器可能残留的额外上下边距 */
+.mode-entertainment .message-blocks-container {
+    padding: 0 !important;
+    margin: 0 !important;
+}
