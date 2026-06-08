@@ -998,16 +998,16 @@ function updateElement(el, rawMarkdown, formatFn) {
                     v-show="!(message.role === 'system' && systemSettings.chatMode === 'entertainment')">
                     
                     <!-- 群聊与娱乐模式 - AI 头像 (左侧) -->
-                    <div v-if="(isGroupMode || systemSettings.chatMode === 'entertainment') && message.role === 'assistant' && message.agentName" class="im-avatar left">
-                      <img :src="getRoleAvatar(message.agentName)" draggable="false" />
+                    <div v-if="(isGroupMode || systemSettings.chatMode === 'entertainment') && message.role === 'assistant' && getMessageAgentName(message)" class="im-avatar left">
+                      <img :src="getRoleAvatar(getMessageAgentName(message))" draggable="false" />
                     </div>
-
+                    
                     <!-- 内容包裹层：负责纵向排列 名字、气泡、按钮 -->
                     <div class="im-content-wrapper">
                       
                       <!-- AI 名字 (仅群聊/娱乐模式显示) -->
-                      <div v-if="(isGroupMode || systemSettings.chatMode === 'entertainment') && message.agentName && message.role === 'assistant'" class="im-name-tag">
-                          {{ message.agentName }}
+                      <div v-if="(isGroupMode || systemSettings.chatMode === 'entertainment') && getMessageAgentName(message) && message.role === 'assistant'" class="im-name-tag">
+                          {{ getMessageAgentName(message) }}
                       </div>
 
                       <!-- TTS 控制区 -->
@@ -1194,8 +1194,8 @@ function updateElement(el, rawMarkdown, formatFn) {
                       </div>
 
                       <!-- ✨ 娱乐模式专属：消息发送时间戳 -->
-                      <div v-if="systemSettings.chatMode === 'entertainment' && message.timestamp" class="im-time-stamp" :class="message.role">
-                        {{ formatMessageTime(message.timestamp) }}
+                      <div v-if="systemSettings.chatMode === 'entertainment' && formatMessageTime(message.timestamp, message.id)" class="im-time-stamp" :class="message.role">
+                        {{ formatMessageTime(message.timestamp, message.id) }}
                       </div>
 
                       <!-- 操作按钮区 -->

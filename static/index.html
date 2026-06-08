@@ -17263,13 +17263,13 @@ function updateElement(el, rawMarkdown, formatFn) {
                     <div v-if="(isGroupMode || systemSettings.chatMode === 'entertainment') && message.role === 'assistant' && getMessageAgentName(message)" class="im-avatar left">
                       <img :src="getRoleAvatar(getMessageAgentName(message))" draggable="false" />
                     </div>
-
+                    
                     <!-- 内容包裹层：负责纵向排列 名字、气泡、按钮 -->
                     <div class="im-content-wrapper">
                       
                       <!-- AI 名字 (仅群聊/娱乐模式显示) -->
-                      <div v-if="(isGroupMode || systemSettings.chatMode === 'entertainment') && message.agentName && message.role === 'assistant'" class="im-name-tag">
-                          {{ message.agentName }}
+                      <div v-if="(isGroupMode || systemSettings.chatMode === 'entertainment') && getMessageAgentName(message) && message.role === 'assistant'" class="im-name-tag">
+                          {{ getMessageAgentName(message) }}
                       </div>
 
                       <!-- TTS 控制区 -->
