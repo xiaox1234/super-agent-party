@@ -506,6 +506,7 @@ let vue_data = {
       proxyMode: 'system', //system or manual or none
       isChinaProxy: false,
       chatMode:'standard', // 默认聊天界面模式
+      githubProxy: '', // GitHub 仓库代理地址，留空则直连
     },
     networkOptions:[
       { value: 'local', label: 'local' }, 

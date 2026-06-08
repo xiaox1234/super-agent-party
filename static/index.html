@@ -12301,6 +12301,7 @@ function updateElement(el, rawMarkdown, formatFn) {
                     </div>
                   </div>
 
+                  <!-- ===== 代理设置部分 ===== -->
                   <div class="tool-item">
                     <div class="tool-header">
                       <span>
@@ -12330,6 +12331,16 @@ function updateElement(el, rawMarkdown, formatFn) {
                           :placeholder="t('proxyPlaceholder')"
                           class="full-width-input"
                           @input="updateProxy"
+                        ></el-input>
+                      </el-form-item>
+
+                      <!-- 新增：GitHub 仓库下载代理地址设置 -->
+                      <el-form-item :label="t('githubProxyLabel') || 'GitHub 仓库代理'" class="form-item-align">
+                        <el-input
+                          v-model="systemSettings.githubProxy"
+                          :placeholder="t('githubProxyPlaceholder')"
+                          class="full-width-input"
+                          @input="autoSaveSettings"
                         ></el-input>
                       </el-form-item>
 
