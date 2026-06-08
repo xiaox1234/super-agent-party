@@ -36,14 +36,14 @@
 
 ### 🚀 **一款拥有无限可能的AI桌面伴侣！**
 
-#### 高自由聊天界面：经典模式、娱乐模式、办公模式，支持替换背景图片，结合实时语音聊天和表情包库，让聊天更加沉浸
-![image](doc/image/img-1/chat.jpeg)
-
 #### 桌面伴侣：支持自定义VRM模型、动作、3D场景，并支持[live2D扩展](https://github.com/heshengtao/sap-live2d)
 ![image](doc/image/img-1/cover.jpeg)
 
 #### 链接VTS：控制Vtube studio中的live2d模型，支持自定义动作和表情控制
 ![image](doc/image/img-1/vts.jpeg)
+
+#### 高自由聊天界面：经典模式、娱乐模式、办公模式，支持替换背景图片，结合实时语音聊天和表情包库，让聊天更加沉浸
+![image](doc/image/img-1/chat.jpeg)
 
 #### 任务中心：让你的AI智能体可以在后台执行任何高级任务，自动控制电脑帮你干活，支持 MCP 和 Agent Skills
 ![image](doc/image/img-1/task.jpeg)
