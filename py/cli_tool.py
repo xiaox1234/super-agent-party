@@ -218,6 +218,7 @@ def apply_hashline_edits(file_content: str, edits: list) -> tuple[bool, str, str
     """
     核心哈希替换引擎（支持自动偏移修复 Auto-Healing）
     """
+    file_content = file_content.replace('\r\n', '\n')
     lines = file_content.split('\n')
     
     # --- 辅助函数：自动寻路 ---
@@ -908,8 +909,9 @@ async def edit_file_patch_tool(path: str, edits: list) -> str:
         
         try:
             script = f"""
-            with open("{path}", "r", encoding="utf-8", errors="replace") as f:
-                print(f.read(), end='')
+            import sys
+            with open("{path}", "rb") as f:
+                sys.stdout.buffer.write(f.read())
             """
             content = await _exec_docker_cmd_simple(real_cwd, ["python3", "-c", script])
         except Exception as e:
@@ -919,7 +921,7 @@ async def edit_file_patch_tool(path: str, edits: list) -> str:
         if not success:
             return msg # 把详细的哈希不匹配错误返回给 AI
             
-        with tempfile.NamedTemporaryFile(mode='w', delete=False, encoding='utf-8') as tmp:
+        with tempfile.NamedTemporaryFile(mode='w', delete=False, encoding='utf-8', newline='\n') as tmp:
             tmp.write(new_content)
             tmp_path = tmp.name
         
@@ -1100,7 +1102,7 @@ async def todo_write_tool(action: str, id: str = None, content: str = None,
             return f"[Error] 未知操作: {action}"
 
         # 写回 Docker 容器
-        with tempfile.NamedTemporaryFile(mode='w', delete=False, encoding='utf-8') as tmp:
+        with tempfile.NamedTemporaryFile(mode='w', delete=False, encoding='utf-8', newline='\n') as tmp:
             tmp.write(json.dumps(todos, indent=2, ensure_ascii=False))
             tmp_path = tmp.name
         
@@ -1222,7 +1224,7 @@ async def edit_file_tool(path: str, content: str) -> str:
     try:
         real_cwd = await _get_current_cwd()
         container_name = await get_or_create_docker_sandbox(real_cwd)
-        with tempfile.NamedTemporaryFile(mode='w', delete=False, encoding='utf-8') as tmp:
+        with tempfile.NamedTemporaryFile(mode='w', delete=False, encoding='utf-8', newline='\n') as tmp:
             tmp.write(content)
             tmp_path = tmp.name
         await _exec_docker_cmd_simple(real_cwd, ["mkdir", "-p", os.path.dirname(path) or "."])
