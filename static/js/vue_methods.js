@@ -2651,9 +2651,9 @@ formatMessage(content, index) {
         } catch (e) {
             console.error("Chat dispatch error:", e);
         } finally {
-          this.isTyping = false;
-          this.isSending = false;
           if (this.abortController === currentController) {
+              this.isTyping = false;
+              this.isSending = false;
               this.abortController = null;
           }
           await this.autoSaveSettings();
@@ -2899,6 +2899,7 @@ formatMessage(content, index) {
             this._streamTextBuffer = '';
             this.first_token = true;
             while (true) {
+                if (this.abortController?.signal.aborted) break;
                 const { done, value } = await reader.read();
                 if (done) break;
                 buffer += decoder.decode(value, { stream: true });
