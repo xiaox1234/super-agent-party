@@ -2607,7 +2607,8 @@ formatMessage(content, index) {
                         // 解析显示名称
                         if (targetId.startsWith('memory/')) {
                             const memId = targetId.split('/')[1];
-                            const memRecord = this.memories.find(m => String(m.id) === String(memId));
+                            // 🔴 核心修复：加上 this.memories && 确保其存在时再调用 .find
+                            const memRecord = this.memories && this.memories.find(m => String(m.id) === String(memId));
                             agentDisplayName = memRecord ? memRecord.name : "Role";
                         } else if (targetId === 'super-model') {
                             agentDisplayName = this.t('defaultAgent');
@@ -2821,10 +2822,12 @@ formatMessage(content, index) {
             
             // 不复用，先冻结上一个不同类型的块（使其脱离响应式）
             if (last && !Object.isFrozen(last)) {
-                Object.freeze(last);
-                if (typeof last.content === 'string') Object.freeze(last.content);
-                if (typeof last.args === 'string') Object.freeze(last.args);
-                if (last.data) Object.freeze(last.data);
+                // 🔴 核心修复：含有复杂对象（如 data 属性）或类型为 approval 的块绝不能冻结，防止违反 Vue 3 Proxy 约束
+                if (last.type !== 'approval' && !last.data) {
+                    Object.freeze(last);
+                    if (typeof last.content === 'string') Object.freeze(last.content);
+                    if (typeof last.args === 'string') Object.freeze(last.args);
+                }
             }
             
             // 创建新块并推入数组
@@ -3083,6 +3086,12 @@ formatMessage(content, index) {
                                 currentMsg.backend_content.push({ role: 'tool', tool_call_id: toolCallId, name: toolName, content: "{}" });
                                 currentMsg.backend_content.push({ role: 'assistant', content: '' });
                                 this.requestScrollToBottom();
+
+                                // 🚀 核心修复：一旦检测到审批块，立即阻断后续流式接收，等候用户操作
+                                if (this.abortController) {
+                                    this.abortController.abort();
+                                }
+                                break; // 强行跳出流式读取循环
                             }
                             else if (tool.type === 'tool_result_stream' && tool.title === "tool_result_stream") {
                                 const targetBlock = getBlock('tool_result', toolCallId, toolName);
@@ -3112,15 +3121,35 @@ formatMessage(content, index) {
                                 // 后端消息存储使用原始内容（可能截断，保护 AI 上下文）
                                 let rawContent = tool.content || '';
                                 if (tool.type === 'call') {
-                                    let last = currentMsg.backend_content[currentMsg.backend_content.length - 1];
+                                    let lastIdx = currentMsg.backend_content.length - 1;
+                                    let last = currentMsg.backend_content[lastIdx];
+                                    
+                                    // 🚀 核心自愈：如果检测到当前最新节点已被冻结，说明是旧 bug 留下的历史包袱，当场深/浅拷贝一份解冻
+                                    if (last && Object.isFrozen(last)) {
+                                        last = { ...last };
+                                        currentMsg.backend_content[lastIdx] = last;
+                                    }
+
                                     const actualArgs = rawContent || "{}"; // 提取真实的参数
                                     
-                                    if (last.role === 'assistant') {
-                                        if (!last.tool_calls) last.tool_calls =[];
+                                    if (last && last.role === 'assistant') {
+                                        // 🚀 克隆可能被冻结的内部 tool_calls 属性，保证可写
+                                        if (!last.tool_calls) {
+                                            last.tool_calls = [];
+                                        } else if (Object.isFrozen(last.tool_calls)) {
+                                            last.tool_calls = [...last.tool_calls];
+                                        }
+
                                         let existingCall = last.tool_calls.find(tc => tc.id === toolCallId);
                                         if (!existingCall) {
                                             last.tool_calls.push({ id: toolCallId, type: 'function', function: { name: tool.title, arguments: actualArgs } });
                                         } else {
+                                            // 🚀 如果查找到的 existingCall 本身也是被冻结的，同样做深拷贝解冻
+                                            let callIdx = last.tool_calls.indexOf(existingCall);
+                                            if (callIdx !== -1 && Object.isFrozen(existingCall)) {
+                                                existingCall = JSON.parse(JSON.stringify(existingCall));
+                                                last.tool_calls[callIdx] = existingCall;
+                                            }
                                             existingCall.function.arguments = actualArgs; // 覆盖占位符，更新为真实参数
                                         }
                                     } else {
@@ -3234,6 +3263,7 @@ formatMessage(content, index) {
                 };
                 this.conversations.unshift(newConv);
             } else {
+                // 🔴 核心修复：添加安全链判断，防止潜在的读取错误
                 const conv = this.conversations.find(conv => conv.id === this.conversationId);
                 if (conv) {
                     conv.messages = this.messages;
@@ -3259,16 +3289,13 @@ formatMessage(content, index) {
             if (currentMsg && Array.isArray(currentMsg.displayBlocks)) {
                 currentMsg.displayBlocks.forEach(block => {
                     if (!Object.isFrozen(block)) {
-                        Object.freeze(block);
-                        if (typeof block.content === 'string') Object.freeze(block.content);
-                        if (typeof block.args === 'string') Object.freeze(block.args);
-                        if (block.data) Object.freeze(block.data);
+                        // 🔴 核心修复：跳过 approval 类型和带有 data 对象的块
+                        if (block.type !== 'approval' && !block.data) {
+                            Object.freeze(block);
+                            if (typeof block.content === 'string') Object.freeze(block.content);
+                            if (typeof block.args === 'string') Object.freeze(block.args);
+                        }
                     }
-                });
-            }
-            if (currentMsg && Array.isArray(currentMsg.backend_content)) {
-                currentMsg.backend_content.forEach(item => {
-                    if (!Object.isFrozen(item)) Object.freeze(item);
                 });
             }
 
@@ -3404,12 +3431,12 @@ formatMessage(content, index) {
     async processToolApproval(toolCallId, action) {
         const currentMsg = this.messages[this.messages.length - 1];
         if (!currentMsg) return;
-        
+        currentMsg.generationFinished = false; 
         const data = this.approvalMap[toolCallId];
-        const toolName = data?.tool_name || 'Tool';
+        const toolName = data?.tool_name || data?.name || 'Tool';
         const blockId = `approval-${toolCallId}`;
 
-        // ✨【优化点2】：不直接修改 targetBlock 属性，而是定位索引并生成新对象替换
+        // 定位并准备将“审批块”转变为“执行结果块”
         let targetIdx = -1;
         if (currentMsg.displayBlocks) {
             targetIdx = currentMsg.displayBlocks.findIndex(b => b.id === toolCallId && b.type === 'approval');
@@ -3420,10 +3447,9 @@ formatMessage(content, index) {
                     type: 'tool_result',
                     name: action === 'deny' ? this.t('denying') : `${this.t('executing')} ${toolName}...`,
                     content: '',
-                    segments: [] // 预留 segments 缓存
+                    segments: [] 
                 };
                 
-                // 安全替换，绕过 Object.freeze 限制并确保响应式
                 if (typeof this.$set === 'function') {
                     this.$set(currentMsg.displayBlocks, targetIdx, updatedBlock);
                 } else {
@@ -3446,27 +3472,95 @@ formatMessage(content, index) {
 
         try {
             let resultText = "";
+            
             if (action === 'deny') {
                 resultText = `User denied the execution of tool '${toolName}'.`;
-            } else {
-                resultText = await this.executeToolBackend(toolName, data.tool_params, action);
-
+                
                 // 更新结果内容
                 if (targetIdx !== -1) {
-                    const finalBlock = {
-                        ...currentMsg.displayBlocks[targetIdx],
-                        type: action === 'deny' ? 'error' : 'tool_result',
-                        name: action === 'deny' ? this.t('tool_deny') : `${toolName} ${this.t('tool_result')}`,
-                        content: resultText,
-                        segments: [] 
-                    };
-                    if (typeof this.$set === 'function') {
-                        this.$set(currentMsg.displayBlocks, targetIdx, finalBlock);
-                    } else {
-                        currentMsg.displayBlocks[targetIdx] = finalBlock;
+                    currentMsg.displayBlocks[targetIdx].content = resultText;
+                    currentMsg.displayBlocks[targetIdx].type = 'error';
+                    currentMsg.displayBlocks[targetIdx].name = this.t('tool_deny');
+                }
+            } else {
+                // 1. 安全提取并标准化参数
+                let toolParams = data?.tool_params || data?.arguments || data?.params || data?.tool_args || {};
+                if (typeof toolParams === 'string') {
+                    try { toolParams = JSON.parse(toolParams); } catch (e) {}
+                }
+
+                // 2. 发起 HTTP 请求
+                const response = await fetch('/execute_tool_manually', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        tool_name: toolName, 
+                        tool_params: toolParams,
+                        approval_type: action 
+                    }),
+                    signal: this.abortController.signal
+                });
+
+                if (!response.ok) {
+                    const errText = await response.text();
+                    throw new Error(`Server Error (${response.status}): ${errText}`);
+                }
+
+                const contentType = response.headers.get('content-type');
+
+                // 🚀 3. 如果后端返回的是流（media_type="text/event-stream"），执行流式渲染
+                if (contentType && contentType.includes('event-stream')) {
+                    const reader = response.body.getReader();
+                    const decoder = new TextDecoder();
+                    let buffer = '';
+
+                    // 动画加载文字改为正式标题
+                    if (targetIdx !== -1) {
+                        currentMsg.displayBlocks[targetIdx].name = `${toolName} ${this.t('tool_result')}`;
+                    }
+
+                    while (true) {
+                        const { done, value } = await reader.read();
+                        if (done) break;
+                        buffer += decoder.decode(value, { stream: true });
+
+                        while (buffer.includes('\n\n')) {
+                            const eventEndIndex = buffer.indexOf('\n\n');
+                            const eventData = buffer.slice(0, eventEndIndex);
+                            buffer = buffer.slice(eventEndIndex + 2);
+
+                            if (eventData.startsWith('data: ')) {
+                                const jsonStr = eventData.slice(6).trim();
+                                try {
+                                    const parsed = JSON.parse(jsonStr);
+                                    if (parsed.chunk) {
+                                        resultText += parsed.chunk;
+                                        // 🌟 实时响应式流式渲染更新到前端组件
+                                        if (targetIdx !== -1) {
+                                            currentMsg.displayBlocks[targetIdx].content = resultText;
+                                        }
+                                        this.requestScrollToBottom();
+                                    } else if (parsed.error) {
+                                        throw new Error(parsed.error);
+                                    }
+                                } catch (e) {
+                                    console.error("Parse event error:", e);
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    // 4. 常规单次完整 JSON 返回适配
+                    const jsonRes = await response.json();
+                    resultText = jsonRes.result || JSON.stringify(jsonRes);
+                    
+                    if (targetIdx !== -1) {
+                        currentMsg.displayBlocks[targetIdx].content = resultText;
+                        currentMsg.displayBlocks[targetIdx].name = `${toolName} ${this.t('tool_result')}`;
                     }
                 }
 
+                // 5. 将结果同步写入 AI 的 backend_content 节点
                 const cleanedForAI = this.truncateForAI(resultText);
                 if (currentMsg.backend_content) {
                     for (let i = currentMsg.backend_content.length - 1; i >= 0; i--) {
@@ -3479,7 +3573,7 @@ formatMessage(content, index) {
                 } 
             }
 
-            // 更新 HTML 部分作为兼容备份
+            // 更新 HTML 兼容性备份块
             const blockClass = action === 'deny' ? 'type-error' : 'type-result';
             const iconClass = action === 'deny' ? 'fa-xmark' : 'fa-check';
             const finalTitle = action === 'deny' ? this.t('tool_deny') : `${toolName} ${this.t('tool_result')}`;
@@ -3490,12 +3584,18 @@ formatMessage(content, index) {
             </div>\n`;
             this.updateUIBlock(currentMsg, blockId, resultHtml);
 
+            // 6. 工具流式写入完毕，触发下一轮 AI 续写生成
             await this.generateAIResponse(this.mainAgent, currentMsg.agentName, true);
 
         } catch (e) {
             console.error("Approval flow failed:", e);
             if (typeof showNotification === 'function') {
-                showNotification("Tool execution failed", 'error');
+                showNotification(e.message || "Tool execution failed", 'error');
+            }
+            if (targetIdx !== -1) {
+                currentMsg.displayBlocks[targetIdx].content = `Error: ${e.message}`;
+                currentMsg.displayBlocks[targetIdx].type = 'error';
+                currentMsg.displayBlocks[targetIdx].name = 'System Error';
             }
             this.isSending = false;
             this.isTyping = false;
@@ -3550,8 +3650,23 @@ formatMessage(content, index) {
                     approval_type: type 
                 })
             });
-            const json = await res.json();
-            return json.result || JSON.stringify(json);
+            
+            // 🚀 核心安全防护：先读取为原始文本
+            const rawText = await res.text();
+            
+            // 如果 HTTP 状态码不正确，直接返回后端输出的错误文本，不进行 JSON 解析
+            if (!res.ok) {
+                return `Server Error (${res.status}): ${rawText}`;
+            }
+            
+            // 尝试以 JSON 解析
+            try {
+                const json = JSON.parse(rawText);
+                return json.result || JSON.stringify(json);
+            } catch (jsonErr) {
+                // 如果解析失败（说明返回了非 JSON 的纯文本），则直接展示原始文本
+                return rawText || `No response from tool execution.`;
+            }
         } catch (e) {
             return `System Error: ${e.message}`;
         }

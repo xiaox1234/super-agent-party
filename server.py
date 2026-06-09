@@ -2,6 +2,7 @@
 # ==========================================
 # 第一步：在加载任何沉重库之前，先搞定端口
 # ==========================================
+import inspect
 import signal
 import struct
 import sys
@@ -1029,7 +1030,7 @@ async def call_node_extension_tool(ext_id: str, tool_name: str, tool_params: dic
         if call_id in mcp_call_results:
             del mcp_call_results[call_id]
 
-async def dispatch_tool(tool_name: str, tool_params: dict, settings: dict,is_sub_agent:bool=False) -> str | List | AsyncIterator[str] | None :
+async def dispatch_tool(tool_name: str, tool_params: dict, settings: dict,is_sub_agent:bool=False,force_allow: bool = False) -> str | List | AsyncIterator[str] | None :
     global mcp_client_list,_TOOL_HOOKS,HA_client,ChromeMCP_client,sql_client, node_ext_mcp_clients, node_ext_mcp_tools
     print("dispatch_tool",tool_name,tool_params)
     
@@ -1284,7 +1285,7 @@ async def dispatch_tool(tool_name: str, tool_params: dict, settings: dict,is_sub
     ]
     
     # 只有当调用的工具属于敏感工具列表时才进行拦截检查
-    if tool_name in SENSITIVE_TOOLS:
+    if tool_name in SENSITIVE_TOOLS and not force_allow: # 如果不是强制允许，则进行权限检查
         
         # 获取相关配置
         cli_settings = settings.get("CLISettings", {})
@@ -6525,288 +6526,53 @@ async def generate_complete_response(client,reasoner_client, request: ChatReques
 @app.post("/execute_tool_manually")
 async def execute_tool_manually(request: Request):
     """
-    前端点击审批按钮后调用的接口
+    前端点击审批按钮后调用的接口（完美支持 AsyncIterator 流式逐步推送的版本）
     """
-    data = await request.json()
-    tool_name = data.get("tool_name")
-    tool_params = data.get("tool_params")
-    approval_type = data.get("approval_type") # 'once' 或 'always'
-    
-    # 获取当前配置
-    settings = await load_settings()
-    cwd = settings.get("CLISettings", {}).get("cc_path")
-    
-    # ==================== 核心逻辑：处理 "Always" ====================
-    if approval_type == "always":
-        # 如果用户选择“不再询问”，则将该工具写入当前项目的 .agent/config.json
-        if cwd:
-            try:
-                add_tool_to_project_config(cwd, tool_name)
-                print(f"[Permission] Added {tool_name} to whitelist for project {cwd}")
-            except Exception as e:
-                return {"result": f"[System Error] Failed to save permission: {str(e)}"}
-        else:
-             return {"result": "[System Error] No working directory found to save config."}
-
-    # ==================== 1. 导入所有工具函数 ====================
-    from py.web_search import (
-        DDGsearch, 
-        searxng, 
-        Tavily_search,
-        Bing_search,
-        Google_search,
-        Brave_search,
-        Exa_search,
-        Serper_search,
-        bochaai_search,
-        jina_crawler,
-        Crawl4Ai_search, 
-        firecrawl_search,
-        simple_fetch,
-        markdown_new,
-    )
-    from py.know_base import query_knowledge_base
-    from py.agent_tool import agent_tool_call
-    from py.a2a_tool import a2a_tool_call
-    from py.llm_tool import custom_llm_tool
-    from py.pollinations import pollinations_image,openai_image,openai_chat_image
-    from py.load_files import get_file_content
-    from py.code_interpreter import e2b_code,local_run_code
-    from py.custom_http import fetch_custom_http
-    from py.comfyui_tool import comfyui_tool_call
-    from py.utility_tools import (
-        time,
-        get_weather,
-        get_location_coordinates,
-        get_weather_by_city,
-        get_wikipedia_summary_and_sections,
-        get_wikipedia_section_content,
-        search_arxiv_papers
-    )
-    from py.autoBehavior import auto_behavior
-
-    # Docker CLI 工具（原有）
-    from py.cli_tool import (
-        docker_sandbox,
-        list_files_tool,
-        read_file_tool,
-        read_file_range_tool, 
-        tail_file_tool,     
-        search_files_tool,
-        edit_file_tool,
-        edit_file_patch_tool, 
-        glob_files_tool,       
-        todo_write_tool, 
-        list_processes_tool,
-        get_process_logs_tool,
-        kill_process_tool,
-        docker_manage_ports_tool,
-        read_skill_tool,
-    )
-
-    # 新增：本地环境 CLI 工具（假设保存在 py/local_cli_tool.py）
-    from py.cli_tool import (
-        shell_tool_local,           # 本地 bash 执行（对应 docker_sandbox）
-        list_files_tool_local,     # 本地文件列表
-        read_file_tool_local,      # 本地文件读取
-        read_file_range_tool_local, # <--- 新增导入
-        tail_file_tool_local,       # <--- 新增导入
-        search_files_tool_local,   # 本地文件搜索
-        edit_file_tool_local,      # 本地文件写入
-        edit_file_patch_tool_local,# 本地精确替换
-        glob_files_tool_local,     # 本地 glob 查找
-        todo_write_tool_local,     # 本地任务管理
-        local_net_tool,            # 本地网络工具
-        read_skill_tool_local,
-    )
-
-    from py.cdp_tool import (
-        list_pages,
-        navigate_page,
-        new_page,
-        close_page,
-        select_page,
-        take_snapshot,
-        wait_for,
-        click,
-        fill,
-        hover,
-        press_key,
-        evaluate_script,
-        take_screenshot,
-        fill_form,
-        drag,
-        handle_dialog
-    )
-    from py.random_topic import get_random_topics,get_categories
-
-    from py.task_tools import (
-        create_subtask,
-        query_task_progress,
-        cancel_subtask,
-        finish_task
-    )
-    
-    from py.computer_use_tool import (
-        mouse_move,
-        mouse_click,
-        mouse_double_click,
-        mouse_drag,
-        mouse_scroll,
-        mouse_hold,
-        copy_to_input_box,
-        keyboard_press,
-        keyboard_sequence,
-        keyboard_hotkey,
-        keyboard_hold,
-        logical_type,
-        wait,
-        screenshot,
-        logical_click,
-    )
-
-    from py.mode_change import update_workspace_settings
-    from py.acpx_tools import acpx_agent
-
-    # ==================== 2. 定义工具映射表 ====================
-    _TOOL_HOOKS = {
-        "DDGsearch": DDGsearch,
-        "searxng": searxng,
-        "Tavily_search": Tavily_search,
-        "query_knowledge_base": query_knowledge_base,
-        "jina_crawler": jina_crawler,
-        "Crawl4Ai_search": Crawl4Ai_search,
-        "firecrawl_search": firecrawl_search,
-        "simple_fetch":simple_fetch,
-        "markdown_new":markdown_new,
-        "agent_tool_call": agent_tool_call,
-        "a2a_tool_call": a2a_tool_call,
-        "custom_llm_tool": custom_llm_tool,
-        "pollinations_image":pollinations_image,
-        "get_file_content":get_file_content,
-        "get_image_content": get_image_content,
-        "e2b_code": e2b_code,
-        "local_run_code": local_run_code,
-        "openai_image": openai_image,
-        "openai_chat_image":openai_chat_image,
-        "Bing_search": Bing_search,
-        "Google_search": Google_search,
-        "Brave_search": Brave_search,
-        "Exa_search": Exa_search,
-        "Serper_search": Serper_search,
-        "bochaai_search": bochaai_search,
-        "comfyui_tool_call": comfyui_tool_call,
-        "time": time,
-        "get_weather": get_weather,
-        "get_location_coordinates": get_location_coordinates,
-        "get_weather_by_city":get_weather_by_city,
-        "get_wikipedia_summary_and_sections": get_wikipedia_summary_and_sections,
-        "get_wikipedia_section_content": get_wikipedia_section_content,
-        "search_arxiv_papers": search_arxiv_papers,
-        "auto_behavior": auto_behavior,
-        "list_pages": list_pages,
-        "new_page": new_page,
-        "close_page": close_page,
-        "select_page": select_page,
-        "navigate_page": navigate_page,
-        "take_snapshot": take_snapshot,
-        "click": click,
-        "fill": fill,
-        "evaluate_script": evaluate_script,
-        "take_screenshot": take_screenshot,
-        "hover": hover,
-        "press_key": press_key,
-        "wait_for": wait_for,
-        "fill_form":fill_form,
-        "drag": drag,
-        "handle_dialog": handle_dialog,
-        "get_random_topics":get_random_topics,
-        "get_categories":get_categories,
-        
-        # Docker Sandbox 相关工具（原有）
-        "docker_sandbox": docker_sandbox,
-        "list_files_tool": list_files_tool,
-        "read_file_tool": read_file_tool,
-        "read_file_range_tool": read_file_range_tool, # <--- 映射新工具
-        "tail_file_tool": tail_file_tool,             # <--- 映射新工具
-        "search_files_tool": search_files_tool,
-        "edit_file_tool": edit_file_tool,
-        "edit_file_patch_tool": edit_file_patch_tool,
-        "glob_files_tool": glob_files_tool,
-        "todo_write_tool": todo_write_tool,
-        "list_processes_tool": list_processes_tool,
-        "get_process_logs_tool": get_process_logs_tool,
-        "kill_process_tool": kill_process_tool,
-        "docker_manage_ports_tool": docker_manage_ports_tool,
-        "read_skill_tool": read_skill_tool,
-        
-        # 本地环境工具（新增）- 与 Docker 版本功能相同但操作本地文件系统
-        "shell_tool_local": shell_tool_local,                     # 本地 bash 执行
-        "list_files_tool_local": list_files_tool_local,         # 本地文件列表
-        "read_file_tool_local": read_file_tool_local,           # 本地文件读取
-        "read_file_range_tool_local": read_file_range_tool_local, # <--- 映射新工具
-        "tail_file_tool_local": tail_file_tool_local,             # <--- 映射新工具
-        "search_files_tool_local": search_files_tool_local,     # 本地文件搜索
-        "edit_file_tool_local": edit_file_tool_local,           # 本地文件写入
-        "edit_file_patch_tool_local": edit_file_patch_tool_local,  # 本地精确替换
-        "glob_files_tool_local": glob_files_tool_local,         # 本地 glob 查找
-        "todo_write_tool_local": todo_write_tool_local,         # 本地任务管理
-        "local_net_tool": local_net_tool,                       # 本地网络工具
-        "read_skill_tool_local": read_skill_tool_local,         # 本地技能读取
-
-        # 任务中心工具（新增）
-        "create_subtask": create_subtask,
-        "query_task_progress": query_task_progress,
-        "cancel_subtask": cancel_subtask,
-        "finish_task":finish_task,
-
-        # 鼠标键盘控制
-        "mouse_move":mouse_move,
-        "mouse_click":mouse_click,
-        "mouse_double_click":mouse_double_click,
-        "mouse_drag":mouse_drag,
-        "mouse_scroll":mouse_scroll,
-        "mouse_hold":mouse_hold,
-        "copy_to_input_box":copy_to_input_box,
-        "keyboard_press":keyboard_press,
-        "keyboard_sequence":keyboard_sequence,
-        "keyboard_hotkey":keyboard_hotkey,
-        "keyboard_hold":keyboard_hold,
-        "logical_type":logical_type,
-        "wait":wait,
-        "screenshot":screenshot,
-        "logical_click":logical_click,
-
-        "update_workspace_settings":update_workspace_settings,
-        "acpx_agent":acpx_agent,
-    }
-    
-
-    if tool_name not in _TOOL_HOOKS:
-        return {"result": f"Tool {tool_name} not found in backend registry."}
-    
-    tool_func = _TOOL_HOOKS[tool_name]
-    
     try:
-        if tool_name in ("acpx_agent", "shell_tool_local", "docker_sandbox"):
-            return tool_func(**tool_params)
+        data = await request.json()
+        tool_name = data.get("tool_name")
+        tool_params = data.get("tool_params") or {}
+        approval_type = data.get("approval_type") # 'once' 或 'always'
+        
+        # 获取当前配置
+        settings = await load_settings()
+        cwd = settings.get("CLISettings", {}).get("cc_path")
+        
+        # ==================== 核心逻辑：处理 "Always" 许可白名单 ====================
+        if approval_type == "always":
+            if cwd:
+                try:
+                    add_tool_to_project_config(cwd, tool_name)
+                    print(f"[Permission] Added {tool_name} to whitelist for project {cwd}")
+                except Exception as e:
+                    return {"result": f"[System Error] Failed to save permission: {str(e)}"}
+            else:
+                 return {"result": "[System Error] No working directory found to save config."}
 
-        # 2. 执行工具
-        result = await tool_func(**tool_params)
+        # ==================== 🚀 核心优化：直接委托 dispatch_tool 执行 ====================
+        result = await dispatch_tool(tool_name, tool_params, settings, force_allow=True)
         
-        # 3. 处理流式输出 (AsyncIterator)
-        # 如果是流，我们需要将其消耗完合并成字符串返回给前端一次性显示
-        # 因为手动执行通常不再支持流式打字机效果（或者前端处理会比较复杂）
-        if hasattr(result, "__aiter__"):
-            output_buffer = []
-            async for chunk in result:
-                output_buffer.append(chunk)
-            return {"result": "".join(output_buffer)}
-        
+        if inspect.isawaitable(result):
+            result = await result
+
+        # ==================== 🚀 核心优化：流式逐步推送 (AsyncIterator) ====================
+        # 如果该工具运行产生的是流式输出，我们返回 StreamingResponse，以 SSE (data:) 格式逐步发给前端
+        if inspect.isgenerator(result) or inspect.isasyncgen(result) or hasattr(result, "__aiter__"):
+            async def event_generator():
+                try:
+                    async for chunk in result:
+                        yield f"data: {json.dumps({'chunk': chunk}, ensure_ascii=False)}\n\n"
+                except Exception as stream_err:
+                    yield f"data: {json.dumps({'error': str(stream_err)}, ensure_ascii=False)}\n\n"
+            return StreamingResponse(event_generator(), media_type="text/event-stream")
+            
+        # 常规工具返回（一次性返回）
         return {"result": str(result)}
-        
+
     except Exception as e:
-        return {"result": f"Error executing {tool_name}: {str(e)}"}
+        traceback.print_exc()
+        return {"result": f"Backend System Error: {str(e)}\n{traceback.format_exc()}"}
+
 
 # 在现有路由后添加以下代码
 @app.get("/v1/models")
