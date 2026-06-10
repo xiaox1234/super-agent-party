@@ -1208,17 +1208,17 @@ preprocessEntertainmentText(content) {
   let formatted = content;
 
   // ============================================================
-  // 【新增】自定义元数据标签净化（羁绊系统等非标准 HTML 属性标签）
-  // 在任何图片隔离或 Markdown 解析之前运行，彻底防止其残留
+  // 【核心修复】自定义元数据标签与中文角色标签净化（如 <user=...>, <星莱>, </星莱>）
   // ============================================================
-  // 1. 过滤原始自定义标签（如：<user=派酱 love=6 familiarity=6>）
-  // 排除标准 HTML 标签，只匹配带有属性赋值（包含 =）的自定义标签
-  const preservedHtmlTags = '(?:div|span|p|br|a|img|strong|em|code|pre|ul|ol|li|h[1-6]|blockquote|table|thead|tbody|tr|th|td|iframe|video|audio|canvas|svg|path|section|button|i|details|summary)';
-  const customTagRegex = new RegExp(`<(?!\\/?${preservedHtmlTags}\\b)[^>]*=[^>]*>`, 'gi');
+  const preservedHtmlTags = '(?:div|span|p|br|a|img|strong|em|code|pre|ul|ol|li|h[1-6]|blockquote|table|thead|tbody|tr|th|td|iframe|video|audio|canvas|svg|path|section|button|i|details|summary|think)';
+  
+  // 1. 过滤原始自定义标签（如 <星莱> 或 <user=派酱 ...>）
+  // 仅匹配非白名单、且符合标签命名规范的节点，完美避开 “a < b” 这种普通数学公式
+  const customTagRegex = new RegExp(`<\\/?(?!(?:${preservedHtmlTags})\\b)[a-zA-Z0-9\\u4e00-\\u9fa5_-]+[^>]*>`, 'gi');
   formatted = formatted.replace(customTagRegex, '');
 
-  // 2. 过滤转义或被 LaTeX 机制转换后的自定义标签（如：\lt user=派酱 ...\gt 或 &lt;user=派酱 ...&gt;）
-  const escapedCustomTagRegex = new RegExp(`(?:&lt;|\\\\lt\\s*)(?!\\/?${preservedHtmlTags}\\b)([^&\\\\\\n]*=[^&\\\\\\n]*)(?:&gt;|\\\\gt\\s*)`, 'gi');
+  // 2. 过滤转义或被 LaTeX 机制转换后的自定义标签（如 \lt 星莱\gt 或 \lt /星莱\gt）
+  const escapedCustomTagRegex = new RegExp(`(?:&lt;|\\\\lt\\b|\\\\lt\\s+)(?:\\/)?(?!(?:${preservedHtmlTags})\\b)([a-zA-Z0-9\\u4e00-\\u9fa5_-]+)[^&\\\\\\n]*(?:&gt;|\\\\gt\\b)`, 'gi');
   formatted = formatted.replace(escapedCustomTagRegex, '');
 
 
@@ -1290,18 +1290,19 @@ formatMessage(content, index) {
   if (!content) return '';
 
   // ============================================================
-  // 【新增】自定义元数据标签净化（羁绊系统等非标准 HTML 属性标签）
-  // 在 formatMessage 预处理最开始执行，防止被 LaTeX 公式保护机制误杀
+  // 【核心修复】自定义元数据标签与中文角色标签净化（如 <user=...>, <星莱>, </星莱>）
+  // 在最开始拦截并清除，防止其被 LaTeX 保护机制混淆成 \lt 字符
   // ============================================================
   let processedForRender = content;
   
-  // 1. 过滤原始自定义标签（如：<user=派酱 love=6 familiarity=6>）
-  const preservedHtmlTags = '(?:div|span|p|br|a|img|strong|em|code|pre|ul|ol|li|h[1-6]|blockquote|table|thead|tbody|tr|th|td|iframe|video|audio|canvas|svg|path|section|button|i|details|summary)';
-  const customTagRegex = new RegExp(`<(?!\\/?${preservedHtmlTags}\\b)[^>]*=[^>]*>`, 'gi');
+  const preservedHtmlTags = '(?:div|span|p|br|a|img|strong|em|code|pre|ul|ol|li|h[1-6]|blockquote|table|thead|tbody|tr|th|td|iframe|video|audio|canvas|svg|path|section|button|i|details|summary|think)';
+  
+  // 1. 过滤原始自定义标签（如 <星莱> 或 <user=派酱 ...>）
+  const customTagRegex = new RegExp(`<\\/?(?!(?:${preservedHtmlTags})\\b)[a-zA-Z0-9\\u4e00-\\u9fa5_-]+[^>]*>`, 'gi');
   processedForRender = processedForRender.replace(customTagRegex, '');
 
-  // 2. 过滤转义或被 LaTeX 机制转换后的自定义标签（如：\lt user=派酱 ...\gt 或 &lt;user=派酱 ...&gt;）
-  const escapedCustomTagRegex = new RegExp(`(?:&lt;|\\/\\/lt\\s*|\\\\lt\\s*)(?!\\/?${preservedHtmlTags}\\b)([^&\\\\\\n]*=[^&\\\\\\n]*)(?:&gt;|\\/\\/gt\\s*|\\\\gt\\s*)`, 'gi');
+  // 2. 过滤转义或被 LaTeX 机制转换后的自定义标签（如 \lt 星莱\gt 或 \lt /星莱\gt）
+  const escapedCustomTagRegex = new RegExp(`(?:&lt;|\\\\lt\\b|\\\\lt\\s+)(?:\\/)?(?!(?:${preservedHtmlTags})\\b)([a-zA-Z0-9\\u4e00-\\u9fa5_-]+)[^&\\\\\\n]*(?:&gt;|\\\\gt\\b)`, 'gi');
   processedForRender = processedForRender.replace(escapedCustomTagRegex, '');
 
   processedForRender = processedForRender.trimEnd(); 
