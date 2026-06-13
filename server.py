@@ -8252,7 +8252,7 @@ async def tha_websocket_endpoint(websocket: WebSocket):
     tha_config = settings.get("THAConfig", {})
     selected_id = tha_config.get("selectedModelId", "Lyra")
 
-    # 1. 查找模型路径 (保持您原本的查找逻辑不变)
+    # 1. 查找模型路径
     model_path = None
     char_path = None
     default_dir = os.path.join(base_path, "tha_models")
@@ -8291,8 +8291,8 @@ async def tha_websocket_endpoint(websocket: WebSocket):
         await tts_manager.connect_tha(websocket)
         websocket._tha_gen = gen
 
-        # 2. 定义：独立的指令接收任务 (无需 wait_for，事件驱动阻塞等待)
-        async def receive_loop():
+        # 2. 接收控制流 Task
+        async def recv_loop():
             try:
                 while True:
                     msg = await websocket.receive_text()
@@ -8307,52 +8307,48 @@ async def tha_websocket_endpoint(websocket: WebSocket):
             except WebSocketDisconnect:
                 raise
             except Exception as e:
-                logging.error(f"[THA WS] Recv task error: {e}")
+                logging.error(f"[THA WS] Instruction receive error: {e}")
 
-        # 3. 定义：独立的渲染发送任务 (带 FPS 限制，且不阻塞 asyncio 线程)
+        # 3. 渲染发送流 Task
         async def render_loop():
-            # 推荐设置为 30 FPS，既能保证动画足够顺滑，又不会给 CPU 造成过大压力
             target_fps = 30
             frame_interval = 1.0 / target_fps
+            loop = asyncio.get_running_loop()
             
             try:
                 while True:
                     start_time = time.perf_counter()
                     
                     pose = gen.step()
-                    # 🌟 关键优化 1：将同步阻塞的 ONNX 推理 + 图像编码抛给外部线程池执行
-                    # 如果 Python 版本低于 3.9，可以使用 loop.run_in_executor(None, engine.render, pose)
-                    jpeg = await asyncio.to_thread(engine.render, pose)
+                    # 使用线程池异步渲染，保证主事件循环通畅
+                    jpeg = await loop.run_in_executor(None, engine.render, pose)
                     
                     await websocket.send_bytes(jpeg)
                     
-                    # 🌟 关键优化 2：根据实际消耗时间动态调整休眠，维持稳定帧率
                     elapsed = time.perf_counter() - start_time
                     sleep_time = max(0.0, frame_interval - elapsed)
                     await asyncio.sleep(sleep_time)
             except WebSocketDisconnect:
                 raise
             except Exception as e:
-                logging.error(f"[THA WS] Render task error: {e}")
+                logging.error(f"[THA WS] Frame render error: {e}")
 
-        # 4. 并发运行接收和发送两个任务
-        recv_task = asyncio.create_task(receive_loop())
+        # 4. 建立并发任务监听 (此处已修正变量名称为 recv_loop)
+        recv_task = asyncio.create_task(recv_loop())
         render_task = asyncio.create_task(render_loop())
 
-        # 只要任意一个任务结束（例如断开连接、抛出异常），就退出等待
         done, pending = await asyncio.wait(
             [recv_task, render_task],
             return_when=asyncio.FIRST_COMPLETED
         )
-        
-        # 退出时，清理取消另一个依然活跃的任务
+
         for task in pending:
             task.cancel()
 
     except WebSocketDisconnect:
         pass
     except Exception as e:
-        logging.error(f"[THA WS] Main loop error: {e}")
+        logging.error(f"[THA WS] Main loop runtime error: {e}")
     finally:
         tts_manager.disconnect_tha(websocket)
 

@@ -205,23 +205,30 @@ function connectRender() {
   renderWs.onmessage = (e) => {
     if (!(e.data instanceof ArrayBuffer)) return;
     const blob = new Blob([e.data], { type: 'image/jpeg' });
-    const url = URL.createObjectURL(blob);
-    const img = new Image();
-    img.onload = () => {
-      const oldTex = sprite ? sprite.texture : null;
-      const tex = PIXI.Texture.from(img);
-      const updated = updateSprite(tex);
-      URL.revokeObjectURL(url);
-      
-      // 核心修复：销毁旧纹理，防止每一帧都在消耗显存
-      if (updated && oldTex && oldTex !== PIXI.Texture.WHITE) {
-        oldTex.destroy(true); 
-      } else if (!updated) {
-        tex.destroy(true);
-      }
-    };
-    img.onerror = () => { URL.revokeObjectURL(url); };
-    img.src = url;
+    
+    // 🌟 核心改进：使用 createImageBitmap 替代 URL.createObjectURL，将图片解码工作搬到后台线程
+    createImageBitmap(blob)
+      .then((imageBitmap) => {
+        if (!sprite || !app) {
+          imageBitmap.close();
+          return;
+        }
+
+        const oldTex = sprite.texture;
+        // PixiJS v7 能够无缝支持以 ImageBitmap 格式创建 Texture
+        const tex = PIXI.Texture.from(imageBitmap);
+        const updated = updateSprite(tex);
+
+        // 🌟 核心修复：清理老旧纹理，防止视频显存（VRAM）和系统 RAM 的泄漏
+        if (updated && oldTex && oldTex !== PIXI.Texture.WHITE) {
+          oldTex.destroy(true); 
+        } else if (!updated) {
+          tex.destroy(true);
+        }
+      })
+      .catch((err) => {
+        console.error('[THA] ImageBitmap async decode failed:', err);
+      });
   };
   renderWs.onclose = () => { connected = false; setTimeout(connectRender, 3000); };
   renderWs.onerror = () => { renderWs.close(); };

@@ -195,6 +195,9 @@ class THAEngine:
         self._loaded = False
         self.model_path = model_path
         self.character_path = character_path
+        
+        # 🌟 优化：预分配不变量，避免循环重复分配内存带来的 GC 压力
+        self.green_bg = np.array([0.0, 255.0, 0.0], dtype=np.float32).reshape(3, 1, 1)
 
     def load(self):
         """加载 ONNX 模型和角色纹理"""
@@ -266,16 +269,17 @@ class THAEngine:
                         rgb = (rgb + 1.0) / 2.0 * 255.0 if np.min(rgb) < -0.1 else rgb * 255.0
                         alpha = (alpha + 1.0) / 2.0 if np.min(alpha) < -0.1 else alpha
                     alpha = np.expand_dims(alpha, axis=0)
-                    green_bg = np.array([0.0, 255.0, 0.0]).reshape(3, 1, 1)
-                    blended = rgb * alpha + green_bg * (1.0 - alpha)
-                    # 🚀 修复点：确保变量名与 return 时的 rgb_out 绝对一致
+                    
+                    # 🌟 优化：使用预分配的背景常量，避免高频分配内存
+                    blended = rgb * alpha + self.green_bg * (1.0 - alpha)
                     rgb_out = np.ascontiguousarray(blended.astype(np.uint8).transpose(1, 2, 0))
                 else:
                     # 字节型数据 (0~255 uint8) 的混合
                     alpha = alpha.astype(np.float32) / 255.0
                     alpha = np.expand_dims(alpha, axis=0)
-                    green_bg = np.array([0.0, 255.0, 0.0]).reshape(3, 1, 1)
-                    blended = rgb.astype(np.float32) * alpha + green_bg * (1.0 - alpha)
+                    
+                    # 🌟 优化：使用预分配的背景常量，避免高频分配内存
+                    blended = rgb.astype(np.float32) * alpha + self.green_bg * (1.0 - alpha)
                     rgb_out = np.ascontiguousarray(blended.astype(np.uint8).transpose(1, 2, 0))
             else:
                 # 如果是 3 通道模型，不进行绿幕混合，安全降级回原版
