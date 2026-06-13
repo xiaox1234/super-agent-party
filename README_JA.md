@@ -83,7 +83,7 @@ CLIエージェントは[README_AGENT.md](https://raw.githubusercontent.com/hesh
 このリンクをAIに送信すると、AIが本ソフトウェアのインストールを案内します！
 
 ```
-https://raw.githubusercontent.com/heshengtao/super-agent-party/main/README_AGENT.md
+curl -fsSL https://raw.githubusercontent.com/heshengtao/super-agent-party/main/README_AGENT.md
 ```
 
 ### Windowsポータブルパッケージ（推奨！インストール不要のソースバージョン、最新リポジトリへのワンクリック同期対応、デスクトップ版のパッケージングを待つ必要なし）
