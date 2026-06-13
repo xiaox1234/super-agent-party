@@ -4285,6 +4285,7 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                     model=model,
                     messages=msg,  # 添加图片信息到消息
                     stream=True,
+                    stream_options={"include_usage": True},
                     extra_body = extra_params, # 其他参数
                     **extra
                 )
@@ -5103,6 +5104,7 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                         model=model,
                         messages=msg,  # 添加图片信息到消息
                         stream=True,
+                        stream_options={"include_usage": True},
                         extra_body = extra_params, # 其他参数
                         **extra
                     )

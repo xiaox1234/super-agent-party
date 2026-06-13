@@ -3133,12 +3133,23 @@ formatMessage(content, index) {
                             }
                             else if (tool.type === 'tool_result_stream' && tool.title === "tool_result_stream") {
                                 const targetBlock = getBlock('tool_result', toolCallId, toolName);
-                                targetBlock.content = this.smartMergeTerminal(targetBlock.content, tool.content);
-                                // 更新 backend_content
+                                
+                                // 限制 UI 层渲染最大字符，防止 DOM 卡死崩溃
+                                if (targetBlock.content.length < 50000) {
+                                    targetBlock.content = this.smartMergeTerminal(targetBlock.content, tool.content);
+                                } else if (!targetBlock.content.endsWith('\n... (Display Truncated)')) {
+                                    targetBlock.content += '\n... (Display Truncated)';
+                                }
+
+                                // 更新 backend_content (动态限制后端历史记录体积)
                                 const lastToolIndex = currentMsg.backend_content.length - 1;
                                 for (let i = lastToolIndex; i >= 0; i--) {
                                     if (currentMsg.backend_content[i].role === 'tool' && currentMsg.backend_content[i].tool_call_id === toolCallId) {
-                                        currentMsg.backend_content[i].content += tool.content;
+                                        if (currentMsg.backend_content[i].content.length < 15000) {
+                                            currentMsg.backend_content[i].content = this.smartMergeTerminal(currentMsg.backend_content[i].content, tool.content);
+                                        } else if (!currentMsg.backend_content[i].content.endsWith('\n... (Truncated)')) {
+                                            currentMsg.backend_content[i].content += '\n... (Truncated)';
+                                        }
                                         break;
                                     }
                                 }
@@ -3158,6 +3169,12 @@ formatMessage(content, index) {
 
                                 // 后端消息存储使用原始内容（可能截断，保护 AI 上下文）
                                 let rawContent = tool.content || '';
+                                
+                                // 🚀 新增：预截断，防止大文件或海量输出瞬间打爆 WebSocket
+                                if (tool.type !== 'call' && rawContent.length > 15000) {
+                                    rawContent = rawContent.slice(0, 15000) + '\n... (Truncated)';
+                                }
+
                                 if (tool.type === 'call') {
                                     let lastIdx = currentMsg.backend_content.length - 1;
                                     let last = currentMsg.backend_content[lastIdx];
@@ -3880,22 +3897,17 @@ formatMessage(content, index) {
     smartMergeTerminal(existing, chunk) {
         if (!chunk) return existing;
         
-        // 如果 chunk 包含回车符 \r，说明需要覆盖当前行
+        // 🚀 核心优化：避免 split('\n') 全局遍历导致的 O(N^2) 内存灾难与 OOM 崩溃
         if (chunk.includes('\r')) {
             let combined = existing + chunk;
-            let lines = combined.split('\n');
-            let lastLine = lines[lines.length - 1];
-
-            // 处理最后一行内部的 \r
-            if (lastLine.includes('\r')) {
-                let subParts = lastLine.split('\r');
-                // 只保留最后一个 \r 之后的内容（即最新的进度）
-                lines[lines.length - 1] = subParts[subParts.length - 1];
-            }
-            return lines.join('\n');
+            const lastNewlineIndex = combined.lastIndexOf('\n');
+            const previousLines = lastNewlineIndex !== -1 ? combined.substring(0, lastNewlineIndex + 1) : '';
+            const lastLine = lastNewlineIndex !== -1 ? combined.substring(lastNewlineIndex + 1) : combined;
+            
+            const subParts = lastLine.split('\r');
+            return previousLines + subParts[subParts.length - 1];
         }
         
-        // 如果没有 \r，直接追加
         return existing + chunk;
     },
 
@@ -4233,7 +4245,10 @@ formatMessage(content, index) {
       }
       return new Promise((resolve, reject) => {
         this.ensureConversationGroups();
-        // 构造 payload（保持原有逻辑）
+        
+        // 🚀 剔除文件对象中隐藏的 base64 blob，仅保留关键路径供恢复
+        const cleanFiles = (files) => (files || []).map(f => ({ name: f.name, path: f.path, type: f.type, detectedType: f.detectedType }));
+
         const payload = {
           ...this.settings,
           showHistorySidebar: this.showHistorySidebar,
@@ -4279,9 +4294,9 @@ formatMessage(content, index) {
           chromeMCPSettings: this.chromeMCPSettings,
           sqlSettings: this.sqlSettings,
           KBSettings: this.KBSettings,
-          textFiles: this.textFiles,
-          imageFiles: this.imageFiles,
-          videoFiles: this.videoFiles,
+          textFiles: cleanFiles(this.textFiles),
+          imageFiles: cleanFiles(this.imageFiles),
+          videoFiles: cleanFiles(this.videoFiles),
           knowledgeBases: this.knowledgeBases,
           modelProviders: this.modelProviders,
           systemSettings: this.systemSettings,
@@ -4308,30 +4323,31 @@ formatMessage(content, index) {
           selectedGroupAgents: this.selectedGroupAgents,
         };
         const correlationId = uuid.v4();
-        // 发送保存请求
-        this.ws.send(JSON.stringify({
-          type: 'save_settings',
-          data: payload,
-          correlationId: correlationId // 添加唯一请求 ID
-        }));
-        // 设置响应监听器
+        
+        try {
+            const jsonStr = JSON.stringify({
+                type: 'save_settings',
+                data: payload,
+                correlationId: correlationId
+            });
+            this.ws.send(jsonStr);
+        } catch (e) {
+            console.error("Payload 序列化失败，已阻断白屏崩溃:", e);
+            reject(e);
+            return;
+        }
+
         const handler = (event) => {
           const response = JSON.parse(event.data);
-          
-          // 匹配对应请求的确认消息
-          if (response.type === 'settings_saved' && 
-              response.correlationId === correlationId) {
+          if (response.type === 'settings_saved' && response.correlationId === correlationId) {
             this.ws.removeEventListener('message', handler);
             resolve();
           }
-          
-          // 错误处理（根据后端实现）
           if (response.type === 'save_error') {
             this.ws.removeEventListener('message', handler);
             reject(new Error('保存失败'));
           }
         };
-        // 设置 10 秒超时
         const timeout = setTimeout(() => {
           this.ws.removeEventListener('message', handler);
           reject(new Error('保存超时'));
@@ -4379,30 +4395,31 @@ formatMessage(content, index) {
           conversationGroups: this.conversationGroups
         };
         const correlationId = uuid.v4();
-        // 发送保存请求
-        this.ws.send(JSON.stringify({
-          type: 'save_conversations',
-          data: payload,
-          correlationId: correlationId // 添加唯一请求 ID
-        }));
-        // 设置响应监听器
+        
+        try {
+            const jsonStr = JSON.stringify({
+                type: 'save_conversations',
+                data: payload,
+                correlationId: correlationId
+            });
+            this.ws.send(jsonStr);
+        } catch (e) {
+            console.error("对话记录序列化失败，已阻断白屏崩溃:", e);
+            reject(e);
+            return;
+        }
+
         const handler = (event) => {
           const response = JSON.parse(event.data);
-          
-          // 匹配对应请求的确认消息
-          if (response.type === 'conversations_saved' && 
-              response.correlationId === correlationId) {
+          if (response.type === 'conversations_saved' && response.correlationId === correlationId) {
             this.ws.removeEventListener('message', handler);
             resolve();
           }
-          
-          // 错误处理（根据后端实现）
           if (response.type === 'save_error') {
             this.ws.removeEventListener('message', handler);
             reject(new Error('保存失败'));
           }
         };
-        // 设置 10 秒超时
         const timeout = setTimeout(() => {
           this.ws.removeEventListener('message', handler);
           reject(new Error('保存超时'));
