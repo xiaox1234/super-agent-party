@@ -2400,10 +2400,14 @@ formatMessage(content, index) {
     sendMessagesToExtension() {
       if (this.ws && this.ws.readyState === WebSocket.OPEN) {
         try {
+          const MAX_WS_MESSAGES = 50;
+          const recentMessages = this.messages.length > MAX_WS_MESSAGES
+            ? this.messages.slice(-MAX_WS_MESSAGES)
+            : this.messages;
           this.ws.send(JSON.stringify({
             type: 'broadcast_messages',
             data: {
-              messages: this.messages,
+              messages: recentMessages,
               conversationId: this.conversationId
             }
           }));
@@ -2845,6 +2849,10 @@ formatMessage(content, index) {
            
             while (blocks.length > 0 && Object.isFrozen(blocks[0]) && blocks.length >= MAX_RENDERED_BLOCKS) {
                 blocks.shift();
+            }
+            if (blocks.length > MAX_RENDERED_BLOCKS + 5) {
+                const removeCount = blocks.length - MAX_RENDERED_BLOCKS;
+                blocks.splice(0, removeCount);
             }
 
             // 如果有 id，先查找已存在的块（如 tool_call / tool_result 复用）
@@ -3379,6 +3387,17 @@ formatMessage(content, index) {
                         }
                     }
                 });
+                const MAX_BACKEND_ENTRIES = 60;
+                if (currentMsg.backend_content.length > MAX_BACKEND_ENTRIES) {
+                    currentMsg.backend_content = currentMsg.backend_content.slice(
+                        currentMsg.backend_content.length - MAX_BACKEND_ENTRIES
+                    );
+                }
+            }
+
+            const MAX_MESSAGES = 500;
+            if (this.messages.length > MAX_MESSAGES) {
+                this.messages.splice(0, this.messages.length - MAX_MESSAGES);
             }
 
             // 冻结已完成消息的所有 displayBlocks 及内部字符串，减少响应式开销
@@ -3416,6 +3435,11 @@ formatMessage(content, index) {
 
             if (shouldSyncGroupMemory && latestUserMessage?.id && currentMsg?.id) {
                 await this.syncGroupMemoryAfterReply(latestUserMessage, currentMsg);
+            }
+
+            this.toolArgsAccumulator = {};
+            if (currentMsg?._ttsState) {
+                delete currentMsg._ttsState;
             }
 
             // 清理流式缓冲区状态
@@ -3798,15 +3822,20 @@ formatMessage(content, index) {
         if (this._streamTargetMsg && this._streamTextBuffer) {
             const block = this.getBlockForMsg(this._streamTargetMsg, 'text');
             if (block) {
-                block.content += this._streamTextBuffer;
+                const MAX_TEXT_CONTENT = 150000;
+                if (block.content.length < MAX_TEXT_CONTENT) {
+                    block.content += this._streamTextBuffer;
+                } else if (!block.content.endsWith('\n... (Truncated)')) {
+                    block.content += '\n... (Truncated)';
+                }
                 
-                // ✨【优化点1】：在 JS 层直接预先解析 segments 并存入 block，避免模板重复计算
                 block.segments = this.splitMessageContent(block.content);
                 
-                this._streamTargetMsg.pure_content += this._streamTextBuffer;
+                if (this._streamTargetMsg.pure_content.length < MAX_TEXT_CONTENT) {
+                    this._streamTargetMsg.pure_content += this._streamTextBuffer;
+                }
                 this._streamTargetMsg.content += this._streamTextBuffer;
                 
-                // 为旧架构兼容也做一份预解析缓存
                 this._streamTargetMsg.segments = this.splitMessageContent(this._streamTargetMsg.content);
             }
             this._streamTextBuffer = '';
