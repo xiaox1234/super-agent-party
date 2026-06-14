@@ -1,7 +1,7 @@
 [project]
 name = "super-agent-party"
-version = "v0.4.2-preview"
-description = "超级智能体派对v0.4.2-preview | 轻松链接一切!"
+version = "v0.4.2"
+description = "超级智能体派对v0.4.2 | 轻松链接一切!"
 license = "AGPL-3.0"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
