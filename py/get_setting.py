@@ -30,7 +30,7 @@ base_path = get_base_path()
 
 # ----------------- 2. 路径定义 -----------------
 # 1. 定义“锚点”路径（系统默认配置目录，无论怎么改路径，这个引导文件永远放在这）
-ANCHOR_USER_DATA_DIR = os.environ.get('ELECTRON_USER_DATA') or user_data_dir(APP_NAME, roaming=True)
+ANCHOR_USER_DATA_DIR = user_data_dir(APP_NAME, roaming=True)
 PATH_REDIRECT_FILE = os.path.join(ANCHOR_USER_DATA_DIR, 'path_config.json')
 
 def get_effective_user_data_dir():
@@ -85,7 +85,7 @@ EXT_DIR = os.path.join(USER_DATA_DIR, "ext")
 DEFAULT_ASR_DIR = os.path.join(USER_DATA_DIR, 'asr')
 DEFAULT_TTS_DIR = os.path.join(USER_DATA_DIR, 'tts')
 DEFAULT_EBD_DIR = os.path.join(USER_DATA_DIR, 'ebd')
-
+DEFAULT_THA_DIR = os.path.join(base_path, 'tha_models')
 # --- 跨平台全局Skills路径 ---
 def get_global_skills_dir():
     """
@@ -111,7 +111,6 @@ BLOCKLIST_FILE = os.path.join(CONFIG_BASE_PATH, 'blocklist.json')
 
 # --- 静态资源 ---
 DEFAULT_VRM_DIR = os.path.join(base_path, 'vrm')
-DEFAULT_THA_DIR = os.path.join(base_path, 'tha_models')
 STATIC_DIR = os.path.join(base_path, "static")
 
 # --- 数据库 ---
@@ -122,7 +121,7 @@ COVS_PATH = os.path.join(USER_DATA_DIR, "conversations.db")
 dirs_to_create =[
     USER_DATA_DIR, LOG_DIR, MEMORY_CACHE_DIR, UPLOAD_FILES_DIR, 
     TOOL_TEMP_DIR, AGENT_DIR, KB_DIR, EXT_DIR, 
-    DEFAULT_ASR_DIR, DEFAULT_TTS_DIR, DEFAULT_EBD_DIR, CONFIG_BASE_PATH, SKILLS_DIR
+    DEFAULT_ASR_DIR, DEFAULT_TTS_DIR, DEFAULT_EBD_DIR, CONFIG_BASE_PATH, SKILLS_DIR,DEFAULT_THA_DIR
 ]
 for d in set(dirs_to_create):
     try:
@@ -469,8 +468,7 @@ async def load_settings():
             if row:
                 try:
                     user_settings = json.loads(row[0])
-                except Exception as e:
-                    logging.error(f"加载用户设置失败 ({DATABASE_PATH}): {e}")
+                except Exception:
                     user_settings = {}
                 
                 # Merge logic
