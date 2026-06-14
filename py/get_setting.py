@@ -85,7 +85,7 @@ EXT_DIR = os.path.join(USER_DATA_DIR, "ext")
 DEFAULT_ASR_DIR = os.path.join(USER_DATA_DIR, 'asr')
 DEFAULT_TTS_DIR = os.path.join(USER_DATA_DIR, 'tts')
 DEFAULT_EBD_DIR = os.path.join(USER_DATA_DIR, 'ebd')
-
+DEFAULT_THA_DIR = os.path.join(base_path, 'tha_models')
 # --- 跨平台全局Skills路径 ---
 def get_global_skills_dir():
     """
@@ -111,7 +111,6 @@ BLOCKLIST_FILE = os.path.join(CONFIG_BASE_PATH, 'blocklist.json')
 
 # --- 静态资源 ---
 DEFAULT_VRM_DIR = os.path.join(base_path, 'vrm')
-DEFAULT_THA_DIR = os.path.join(base_path, 'tha_models')
 STATIC_DIR = os.path.join(base_path, "static")
 
 # --- 数据库 ---
@@ -122,7 +121,7 @@ COVS_PATH = os.path.join(USER_DATA_DIR, "conversations.db")
 dirs_to_create =[
     USER_DATA_DIR, LOG_DIR, MEMORY_CACHE_DIR, UPLOAD_FILES_DIR, 
     TOOL_TEMP_DIR, AGENT_DIR, KB_DIR, EXT_DIR, 
-    DEFAULT_ASR_DIR, DEFAULT_TTS_DIR, DEFAULT_EBD_DIR, CONFIG_BASE_PATH, SKILLS_DIR
+    DEFAULT_ASR_DIR, DEFAULT_TTS_DIR, DEFAULT_EBD_DIR, CONFIG_BASE_PATH, SKILLS_DIR,DEFAULT_THA_DIR
 ]
 for d in set(dirs_to_create):
     try:
@@ -487,6 +486,18 @@ async def load_settings():
                     asyncio.create_task(save_settings(user_settings))
                 return user_settings
             else:
+                # 尝试从旧 settings.json 迁移（兼容旧版本数据）
+                if os.path.exists(SETTINGS_FILE):
+                    try:
+                        with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
+                            user_settings = json.load(f)
+                        logging.info(f"从旧版 settings.json 迁移用户设置: {SETTINGS_FILE}")
+                        merge_defaults(defaults, user_settings)
+                        await save_settings(user_settings)
+                        return user_settings
+                    except Exception as e:
+                        logging.warning(f"从旧版 settings.json 迁移失败: {e}")
+                
                 if IS_DOCKER:
                     defaults["isdocker"] = True
                 await save_settings(defaults)
