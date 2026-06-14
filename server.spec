@@ -43,6 +43,7 @@ a = Analysis(
         ('config/locales.json', 'config'),
         ('static', 'static'),
         ('vrm', 'vrm'),
+        ('tha_models', 'tha_models'),
         ('tiktoken_cache', 'tiktoken_cache'),
         ('skills', 'skills'),
         *ffmpeg_data,
