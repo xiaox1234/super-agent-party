@@ -10920,7 +10920,7 @@ processMarkdownStreamForTTS(message, deltaText, isFinal = false) {
       this.THAConfig.name = 'default';
       await this.autoSaveSettings();
       try {
-        this.isVRMStarting = true;
+        this.isTHAStarting = true;
         const windowConfig = {
           width: this.THAConfig.windowWidth,
           height: this.THAConfig.windowHeight,
@@ -10929,7 +10929,7 @@ processMarkdownStreamForTTS(message, deltaText, isFinal = false) {
       } catch (error) {
         console.error('启动THA失败:', error);
       } finally {
-        this.isVRMStarting = false;
+        this.isTHAStarting = false;
       }
     } else {
       window.open(`${this.partyURL}/tha.html`, '_blank');
