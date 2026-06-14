@@ -377,7 +377,7 @@ import argparse
 from py.dify_openai import DifyOpenAIAsync
 from py.ClaudeAsOpenAI import AsyncClaudeAsOpenAI
 from py.GeminiAsOpenAI import AsyncGeminiAsOpenAI
-from py.get_setting import EXT_DIR, IS_DOCKER, SKILLS_DIR, _copy_default_skills, convert_to_opus_simple, load_covs, load_settings, save_covs,save_settings,clean_temp_files_task,base_path,configure_host_port,UPLOAD_FILES_DIR,AGENT_DIR,MEMORY_CACHE_DIR,KB_DIR,DEFAULT_VRM_DIR,USER_DATA_DIR,LOG_DIR,TOOL_TEMP_DIR,COVS_PATH
+from py.get_setting import EXT_DIR, IS_DOCKER, SKILLS_DIR, _copy_default_skills, convert_to_opus_simple, load_covs, load_settings, save_covs,save_settings,clean_temp_files_task,base_path,configure_host_port,UPLOAD_FILES_DIR,AGENT_DIR,MEMORY_CACHE_DIR,KB_DIR,DEFAULT_VRM_DIR,DEFAULT_THA_DIR,USER_DATA_DIR,LOG_DIR,TOOL_TEMP_DIR,COVS_PATH
 from py.llm_tool import get_image_base64,get_image_media_type
 timetamp = time.time()
 log_path = os.path.join(LOG_DIR, f"backend_{timetamp}.log")
@@ -1113,6 +1113,7 @@ async def dispatch_tool(tool_name: str, tool_params: dict, settings: dict,is_sub
         glob_files_tool_local,     # 本地 glob 查找
         todo_write_tool_local,     # 本地任务管理
         local_net_tool,            # 本地网络工具
+        send_process_input_tool,
         read_skill_tool_local,
     )
 
@@ -1248,6 +1249,7 @@ async def dispatch_tool(tool_name: str, tool_params: dict, settings: dict,is_sub
         "glob_files_tool_local": glob_files_tool_local,         # 本地 glob 查找
         "todo_write_tool_local": todo_write_tool_local,         # 本地任务管理
         "local_net_tool": local_net_tool,                       # 本地网络工具
+        "send_process_input_tool":send_process_input_tool,       # 本地进程输入工具
         "read_skill_tool_local": read_skill_tool_local,         # 本地技能读取
 
         # 任务中心工具（新增）
@@ -1292,6 +1294,7 @@ async def dispatch_tool(tool_name: str, tool_params: dict, settings: dict,is_sub
         "kill_process_tool",
         "docker_manage_ports_tool",
         "local_net_tool",
+        "send_process_input_tool",
     ]
     
     # 只有当调用的工具属于敏感工具列表时才进行拦截检查
@@ -4075,6 +4078,7 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                             "kill_process_tool",
                             "docker_manage_ports_tool",
                             "local_net_tool",
+                            "send_process_input_tool",
                             
                             # 阻止子智能体创建子任务（防止递归）
                             "create_subtask",
@@ -8003,6 +8007,7 @@ class TTSConnectionManager:
     def __init__(self):
         self.main_connections: List[WebSocket] = []
         self.vrm_connections: List[WebSocket] = []
+        self.tha_connections: List[WebSocket] = []
         self.overlay_connections: list[WebSocket] = []
 
     async def connect_main(self, websocket: WebSocket):
@@ -8015,6 +8020,11 @@ class TTSConnectionManager:
         self.vrm_connections.append(websocket)
         logging.info(f"VRM interface connected. Total: {len(self.vrm_connections)}")
 
+    async def connect_tha(self, websocket: WebSocket):
+        await websocket.accept()
+        self.tha_connections.append(websocket)
+        logging.info(f"THA interface connected. Total: {len(self.tha_connections)}")
+
     def disconnect_main(self, websocket: WebSocket):
         if websocket in self.main_connections:
             self.main_connections.remove(websocket)
@@ -8022,6 +8032,10 @@ class TTSConnectionManager:
     def disconnect_vrm(self, websocket: WebSocket):
         if websocket in self.vrm_connections:
             self.vrm_connections.remove(websocket)
+
+    def disconnect_tha(self, websocket: WebSocket):
+        if websocket in self.tha_connections:
+            self.tha_connections.remove(websocket)
 
     async def broadcast_to_vrm(self, message: Union[str, bytes]):
         """核心：同时支持字符串 JSON 和二进制 Blob 透传"""
@@ -8068,17 +8082,26 @@ class TTSConnectionManager:
                 try: await conn.send_bytes(message)
                 except: self.disconnect_vrm(conn)
         
-        # 2. 如果是字符串（指令/文字），发给 VRM 页面 和 字幕页面
+        # 2. 如果是字符串（指令/文字），发给 VRM 和字幕页面
         else:
-            # 发给 VRM 窗口（同步表情、UI等）
             for conn in list(self.vrm_connections):
                 try: await conn.send_text(message)
                 except: self.disconnect_vrm(conn)
             
-            # 发给字幕窗口（显示文字）
             for conn in list(self.overlay_connections):
                 try: await conn.send_text(message)
                 except: self.disconnect_overlay(conn)
+
+    async def broadcast_emotion_to_tha(self, emotion: str):
+        """直接向所有 THA 姿态生成器发送表情指令"""
+        conns = list(self.tha_connections)
+        for conn in conns:
+            try:
+                gen = getattr(conn, '_tha_gen', None)
+                if gen:
+                    gen.set_emotion(emotion)
+            except:
+                self.disconnect_tha(conn)
 
 
 tts_manager = TTSConnectionManager()
@@ -8150,6 +8173,9 @@ async def tts_websocket_endpoint(websocket: WebSocket):
                     if msg_type in ["ttsStarted", "startSpeaking"]:
                         if hasattr(vts_instance, "triggered_tags_in_session"):
                             vts_instance.triggered_tags_in_session.clear()
+                        # THA 表情重置（TTS开始时回到中立表情）
+                        if msg_type == "ttsStarted":
+                            asyncio.create_task(tts_manager.broadcast_emotion_to_tha("neutral"))
                     
                     if msg_type == "startVTS_Driver":
                         success = await vts_instance.connect(payload.get("data", {}))
@@ -8169,19 +8195,25 @@ async def tts_websocket_endpoint(websocket: WebSocket):
                             "data": {"success": False, "message": "VTS Disconnected"}
                         }))
                     elif msg_type == "startSpeaking":
+                        data_content = payload.get("data", {})
+                        expressions = data_content.get("expressions",[])
                         if vts_instance.is_running:
-                            data_content = payload.get("data", {})
-                            expressions = data_content.get("expressions",[])
                             for exp in expressions:
                                 asyncio.create_task(vts_instance.trigger_hotkey(exp))
+                        # THA 表情广播
+                        for exp in expressions:
+                            asyncio.create_task(tts_manager.broadcast_emotion_to_tha(exp))
 
                     # === 【新增】TTS 禁用时，流式文本(omniStreaming)携带的动作表情触发支持 ===
                     elif msg_type == "omniStreaming":
+                        data_content = payload.get("data", {})
+                        expressions = data_content.get("expressions", [])
                         if vts_instance.is_running:
-                            data_content = payload.get("data", {})
-                            expressions = data_content.get("expressions", [])
                             for exp in expressions:
                                 asyncio.create_task(vts_instance.trigger_hotkey(exp))
+                        # THA 表情广播
+                        for exp in expressions:
+                            asyncio.create_task(tts_manager.broadcast_emotion_to_tha(exp))
 
                     await tts_manager.broadcast_to_vrm(msg["text"])
                 except Exception as e:
@@ -8210,6 +8242,115 @@ async def vrm_websocket_endpoint(websocket: WebSocket):
     except Exception as e:
         logging.error(f"WS error in VRM: {e}")
         tts_manager.disconnect_vrm(websocket)
+
+@app.websocket("/ws/tha")
+async def tha_websocket_endpoint(websocket: WebSocket):
+    """THA 桌面宠物 WebSocket：接收控制指令，返回 JPEG 帧"""
+    from py.tha_engine import THAPoseGenerator, get_engine, clear_engine_cache
+
+    settings = await load_settings()
+    tha_config = settings.get("THAConfig", {})
+    selected_id = tha_config.get("selectedModelId", "Lyra")
+
+    # 1. 查找模型路径
+    model_path = None
+    char_path = None
+    default_dir = os.path.join(base_path, "tha_models")
+    for entry in os.listdir(default_dir):
+        entry_path = os.path.join(default_dir, entry)
+        if os.path.isdir(entry_path) and entry == selected_id:
+            mp = os.path.join(entry_path, "model.onnx")
+            cp = os.path.join(entry_path, "character.png")
+            if os.path.exists(mp) and os.path.exists(cp):
+                model_path = mp
+                char_path = cp
+                break
+
+    if not model_path:
+        user_dir = UPLOAD_FILES_DIR
+        for entry in os.listdir(user_dir):
+            entry_path = os.path.join(user_dir, entry)
+            if os.path.isdir(entry_path) and entry == selected_id:
+                mp = os.path.join(entry_path, "model.onnx")
+                cp = os.path.join(entry_path, "character.png")
+                if os.path.exists(mp) and os.path.exists(cp):
+                    model_path = mp
+                    char_path = cp
+                    break
+
+    if not model_path:
+        logging.error(f"[THA WS] Model not found: {selected_id}")
+        await websocket.accept()
+        await websocket.close()
+        return
+
+    try:
+        engine = get_engine(model_path, char_path)
+        gen = THAPoseGenerator()
+
+        await tts_manager.connect_tha(websocket)
+        websocket._tha_gen = gen
+
+        # 2. 接收控制流 Task
+        async def recv_loop():
+            try:
+                while True:
+                    msg = await websocket.receive_text()
+                    data = json.loads(msg)
+                    cmd_type = data.get("type", "")
+                    if cmd_type == "emotion":
+                        gen.set_emotion(data.get("emotion", "neutral"))
+                    elif cmd_type == "mouth":
+                        gen.set_mouth(float(data.get("amplitude", 0)))
+                    elif cmd_type == "mouse":
+                        gen.set_mouse(float(data.get("x", 0)), float(data.get("y", 0)))
+            except WebSocketDisconnect:
+                raise
+            except Exception as e:
+                logging.error(f"[THA WS] Instruction receive error: {e}")
+
+        # 3. 渲染发送流 Task
+        async def render_loop():
+            target_fps = 30
+            frame_interval = 1.0 / target_fps
+            loop = asyncio.get_running_loop()
+            
+            try:
+                while True:
+                    start_time = time.perf_counter()
+                    
+                    pose = gen.step()
+                    # 使用线程池异步渲染，保证主事件循环通畅
+                    jpeg = await loop.run_in_executor(None, engine.render, pose)
+                    
+                    await websocket.send_bytes(jpeg)
+                    
+                    elapsed = time.perf_counter() - start_time
+                    sleep_time = max(0.0, frame_interval - elapsed)
+                    await asyncio.sleep(sleep_time)
+            except WebSocketDisconnect:
+                raise
+            except Exception as e:
+                logging.error(f"[THA WS] Frame render error: {e}")
+
+        # 4. 建立并发任务监听 (此处已修正变量名称为 recv_loop)
+        recv_task = asyncio.create_task(recv_loop())
+        render_task = asyncio.create_task(render_loop())
+
+        done, pending = await asyncio.wait(
+            [recv_task, render_task],
+            return_when=asyncio.FIRST_COMPLETED
+        )
+
+        for task in pending:
+            task.cancel()
+
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        logging.error(f"[THA WS] Main loop runtime error: {e}")
+    finally:
+        tts_manager.disconnect_tha(websocket)
 
 @app.websocket("/ws/subtitles")
 async def subtitles_websocket_endpoint(websocket: WebSocket):
@@ -10763,6 +10904,114 @@ async def vrm_config():
     settings = await load_settings()
     return {"VRMConfig": settings.get("VRMConfig", {})}
 
+@app.get("/tha_config")
+async def tha_config():
+    settings = await load_settings()
+    return {"THAConfig": settings.get("THAConfig", {})}
+
+
+@app.post("/tha_config")
+async def set_tha_config(request: Request):
+    """从THA页面前端更新模型选择"""
+    try:
+        payload = await request.json()
+        settings = await load_settings()
+        tha = settings.get("THAConfig", {})
+        if "selectedModelId" in payload:
+            tha["selectedModelId"] = payload["selectedModelId"]
+            settings["THAConfig"] = tha
+            await save_settings(settings)
+        return {"success": True}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"success": False, "message": str(e)})
+
+
+@app.post("/upload_tha_model")
+async def upload_tha_model(
+    request: Request,
+    file: UploadFile = File(...),
+    display_name: str = Form(...)
+):
+    from py.tha_engine import THAModelManager
+
+    file_extension = file.filename.split('.')[-1].lower()
+    if file_extension != 'zip':
+        return JSONResponse(
+            status_code=400,
+            content={"success": False, "message": "只支持.zip格式的THA模型包"}
+        )
+
+    try:
+        zip_data = await file.read()
+        manager = THAModelManager(DEFAULT_THA_DIR, UPLOAD_FILES_DIR)
+        success, msg, info = manager.install_zip(zip_data, display_name)
+
+        if success:
+            return JSONResponse(content={
+                "success": True,
+                "message": msg,
+                "model": info
+            })
+        else:
+            return JSONResponse(
+                status_code=400,
+                content={"success": False, "message": msg}
+            )
+    except Exception as e:
+        logger.error(f"上传THA模型失败: {str(e)}")
+        return JSONResponse(
+            status_code=500,
+            content={"success": False, "message": f"上传失败: {str(e)}"}
+        )
+
+
+@app.get("/get_default_tha_models")
+async def get_default_tha_models(request: Request):
+    from py.tha_engine import THAModelManager
+    try:
+        manager = THAModelManager(DEFAULT_THA_DIR, UPLOAD_FILES_DIR)
+        models = manager.scan_default_models()
+        return JSONResponse(content={"success": True, "models": models})
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={"success": False, "message": f"获取默认模型失败: {str(e)}"}
+        )
+
+
+@app.get("/get_user_tha_models")
+async def get_user_tha_models(request: Request):
+    from py.tha_engine import THAModelManager
+    try:
+        manager = THAModelManager(DEFAULT_THA_DIR, UPLOAD_FILES_DIR)
+        models = manager.scan_user_models()
+        return JSONResponse(content={"success": True, "models": models})
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={"success": False, "message": f"获取用户模型失败: {str(e)}"}
+        )
+
+
+@app.delete("/delete_tha_model/{model_id}")
+async def delete_tha_model(model_id: str):
+    from py.tha_engine import THAModelManager
+    try:
+        manager = THAModelManager(DEFAULT_THA_DIR, UPLOAD_FILES_DIR)
+        if manager.delete_model(model_id):
+            return JSONResponse(content={"success": True, "message": "THA模型已删除"})
+        else:
+            return JSONResponse(
+                status_code=404,
+                content={"success": False, "message": "模型不存在或无法删除默认模型"}
+            )
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={"success": False, "message": f"删除失败: {str(e)}"}
+        )
+
+
 from py.live_router import router as live_router, ws_router as live_ws_router
 
 # 2. 分别挂载
@@ -11460,6 +11709,7 @@ mcp = FastApiMCP(
 mcp.mount()
 
 app.mount("/vrm", StaticFiles(directory=DEFAULT_VRM_DIR), name="vrm")
+app.mount("/tha_models", StaticFiles(directory=DEFAULT_THA_DIR), name="tha_models")
 app.mount("/tool_temp", StaticFiles(directory=TOOL_TEMP_DIR), name="tool_temp")
 app.mount("/uploaded_files", StaticFiles(directory=UPLOAD_FILES_DIR), name="uploaded_files")
 app.mount("/ext", StaticFiles(directory=EXT_DIR), name="ext")

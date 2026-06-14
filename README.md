@@ -86,7 +86,7 @@ CLI Agent needs to check the documentation at [README_AGENT.md](https://raw.gith
 Send this link to your AI, and the AI will guide you through installing this software!
 
 ```
-https://raw.githubusercontent.com/heshengtao/super-agent-party/main/README_AGENT.md
+curl -fsSL https://raw.githubusercontent.com/heshengtao/super-agent-party/main/README_AGENT.md
 ```
 
 ### Windows portable package (Recommended! Installation-free source version, support one-click synchronization to the latest version of the warehouse, no need to wait for the desktop version to be packaged)

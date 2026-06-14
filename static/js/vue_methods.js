@@ -2054,6 +2054,7 @@ formatMessage(content, index) {
           this.ttsSettings = data.data.ttsSettings || this.ttsSettings;
           this.behaviorSettings = data.data.behaviorSettings || this.behaviorSettings;
           this.VRMConfig = data.data.VRMConfig || this.VRMConfig;
+          this.THAConfig = data.data.THAConfig || this.THAConfig;
           this.comfyuiServers = data.data.comfyuiServers || this.comfyuiServers;
           this.comfyuiAPIkey = data.data.comfyuiAPIkey || this.comfyuiAPIkey;
           this.workflows = data.data.workflows || this.workflows;
@@ -2166,6 +2167,7 @@ formatMessage(content, index) {
           this.ttsSettings = data.data.ttsSettings || this.ttsSettings;
           this.behaviorSettings = data.data.behaviorSettings || this.behaviorSettings;
           this.VRMConfig = data.data.VRMConfig || this.VRMConfig;
+          this.THAConfig = data.data.THAConfig || this.THAConfig;
           this.comfyuiServers = data.data.comfyuiServers || this.comfyuiServers;
           this.comfyuiAPIkey = data.data.comfyuiAPIkey || this.comfyuiAPIkey;
           this.workflows = data.data.workflows || this.workflows;
@@ -2193,6 +2195,7 @@ formatMessage(content, index) {
           this.loadDefaultModels();
           this.loadDefaultMotions();
           this.loadGaussScenes();
+          this.loadTHAModels();
           this.checkMobile();
           this.checkQQBotStatus(); 
           this.checkFeishuBotStatus();
@@ -2489,9 +2492,6 @@ formatMessage(content, index) {
     // 1. 用户动作入口与调度函数（可直接替换）
     // ==========================================
     async sendMessage(role = 'user') { 
-        const currentController = new AbortController(); 
-        this.abortController = currentController; // 更新全局控制器
-
         // 基础校验
         if (!this.userInput.trim() && (!this.files || this.files.length === 0) && (!this.images || this.images.length === 0)) return;
         if (this.isTyping) return;
@@ -2692,9 +2692,7 @@ formatMessage(content, index) {
         } finally {
           this.isTyping = false;
           this.isSending = false;
-          if (this.abortController === currentController) {
-              this.abortController = null;
-          }
+          this.abortController = null;
           await this.autoSaveSettings();
           await this.saveConversations();
         }
@@ -2899,6 +2897,11 @@ formatMessage(content, index) {
         };
 
         try {
+            const fetchTimeoutMs = 120000;
+            const abortSignal = this.abortController.signal;
+            const timeoutSignal = AbortSignal.timeout(fetchTimeoutMs);
+            const combinedSignal = AbortSignal.any([abortSignal, timeoutSignal]);
+
             const response = await fetch(`/v1/chat/completions`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -2913,7 +2916,7 @@ formatMessage(content, index) {
                     group_id: this.stringifyEntityId(this.activeConversationGroupId || this.draftConversationGroupId || 'default'),
                     user_message_id: this.stringifyEntityId(latestUserMessage?.id || null),
                 }),
-                signal: this.abortController.signal
+                signal: combinedSignal
             });
 
             if (!response.ok) {
@@ -2937,9 +2940,25 @@ formatMessage(content, index) {
             this._streamTargetMsg = currentMsg;
             this._streamTextBuffer = '';
             this.first_token = true;
+            const readTimeoutMs = 60000;
+            let streamFinished = false;
             while (true) {
                 if (this.abortController?.signal.aborted) break;
-                const { done, value } = await reader.read();
+                let readResult;
+                try {
+                    readResult = await Promise.race([
+                        reader.read(),
+                        new Promise((_, reject) => setTimeout(() => reject(new Error('Read timeout')), readTimeoutMs))
+                    ]);
+                } catch (readErr) {
+                    if (readErr.message === 'Read timeout') {
+                        console.error('Stream read timeout, aborting');
+                        this.abortController?.abort();
+                        throw new DOMException('Response stream timed out', 'TimeoutError');
+                    }
+                    throw readErr;
+                }
+                const { done, value } = readResult;
                 if (done) break;
                 buffer += decoder.decode(value, { stream: true });
 
@@ -2950,8 +2969,15 @@ formatMessage(content, index) {
 
                     if (eventData.startsWith('data: ')) {
                         const jsonStr = eventData.slice(6).trim();
-                        if (jsonStr === '[DONE]') break;
-                        const parsed = JSON.parse(jsonStr);
+                        if (!jsonStr) continue;
+                        if (jsonStr === '[DONE]') { streamFinished = true; break; }
+                        let parsed;
+                        try {
+                            parsed = JSON.parse(jsonStr);
+                        } catch (parseErr) {
+                            console.warn('SSE parse error, skipping chunk:', parseErr.message, jsonStr.slice(0, 200));
+                            continue;
+                        }
                         const delta = parsed.choices?.[0]?.delta;
                         if (!delta) continue;
 
@@ -3256,6 +3282,7 @@ formatMessage(content, index) {
                         this.sendMessagesToExtension();
                     }
                 }
+                if (streamFinished) break;
             }
 
             // 循环结束后，强制刷新缓冲区中剩余的文字
@@ -3286,7 +3313,7 @@ formatMessage(content, index) {
 
         } catch (error) {
             console.error(error);
-            if (error.name !== 'AbortError') {
+            if (error.name !== 'AbortError' && error.name !== 'TimeoutError') {
                 showNotification(error.message, 'error');
                 const b = getBlock('error', 'err', 'System Error');
                 b.content = this.truncateDisplayContent(error.message);
@@ -3306,10 +3333,8 @@ formatMessage(content, index) {
             }
             if (audioResolve) audioResolve();
         } finally {
-            if (this.abortController === currentController) {
-                this.isSending = false;
-                this.isTyping = false;
-            }
+            this.isSending = false;
+            this.isTyping = false;
             this.voiceStack = ['default'];
             if (this.allBriefly) currentMsg.briefly = true;
 
@@ -4321,6 +4346,7 @@ formatMessage(content, index) {
           ttsSettings: this.ttsSettings,
           behaviorSettings: this.behaviorSettings,
           VRMConfig: this.VRMConfig,
+          THAConfig: this.THAConfig,
           comfyuiServers: this.comfyuiServers,
           comfyuiAPIkey: this.comfyuiAPIkey,
           workflows: this.workflows,
@@ -9699,13 +9725,6 @@ processMarkdownStreamForTTS(message, deltaText, isFinal = false) {
             return `<silence>${url}</silence>`;
         });
 
-        // B. 清理/静音非音色定义的其他 HTML 标签 (如 <button>, <img ...>)，防止 TTS 念出 HTML 源码
-        // 🔴 核心修复点 1：使用 Unicode 安全的边界否定断言 (?![a-zA-Z0-9_\u4e00-\u9fa5_-]) 代替 ASCII 的 \b
-        // 确保“星莱”、“旁白”等中文字符后面的“>”或“/”能被正确识别为边界，不会将中文音色标签当成普通 HTML 误杀
-        const voiceTagsPattern = `\\/?(?:${voiceKeys.join('|')})(?![a-zA-Z0-9_\\u4e00-\\u9fa5_-])`;
-        const htmlTagRe = new RegExp(`<(?!(?:${voiceTagsPattern}))[^>]+>`, 'gi');
-        buffer = buffer.replace(htmlTagRe, '');
-
         // 2. 基础清理逻辑 (此时图片已被彻底过滤，在此处安全清理常规超链接，支持多行 [文本](url))
         buffer = buffer
             .replace(/#{1,6}\s/gm, '')
@@ -10611,6 +10630,16 @@ processMarkdownStreamForTTS(message, deltaText, isFinal = false) {
       window.open(`${this.partyURL}/vrm.html`, '_blank');
     }
   },
+
+  async stopVRM() {
+    if (this.isElectron) {
+      try {
+        await window.electronAPI.stopVRMWindow();
+      } catch (error) {
+        console.error('关闭VRM失败:', error);
+      }
+    }
+  },
     async checkServerPort() {
       try {
         // 方式1：使用专门的方法
@@ -10884,7 +10913,174 @@ processMarkdownStreamForTTS(message, deltaText, isFinal = false) {
       showNotification('删除失败，请稍后再试', 'error');
     }
   },
-  
+
+  // ========== THA Desktop Pet Methods ==========
+  async startTHA() {
+    if (this.isElectron) {
+      this.THAConfig.name = 'default';
+      await this.autoSaveSettings();
+      try {
+        this.isVRMStarting = true;
+        const windowConfig = {
+          width: this.THAConfig.windowWidth,
+          height: this.THAConfig.windowHeight,
+        };
+        await window.electronAPI.startTHAWindow(windowConfig);
+      } catch (error) {
+        console.error('启动THA失败:', error);
+      } finally {
+        this.isVRMStarting = false;
+      }
+    } else {
+      window.open(`${this.partyURL}/tha.html`, '_blank');
+    }
+  },
+
+  async startTHAweb() {
+    if (this.isElectron) {
+      window.electronAPI.openExternal(`${this.partyURL}/tha.html`);
+    } else {
+      window.open(`${this.partyURL}/tha.html`, '_blank');
+    }
+  },
+
+  async stopTHA() {
+    if (this.isElectron) {
+      try {
+        await window.electronAPI.stopTHAWindow();
+      } catch (error) {
+        console.error('停止THA失败:', error);
+      }
+    }
+  },
+
+  async uploadTHAModel() {
+    if (!this.newThaModel.file) {
+      showNotification('请先选择THA模型ZIP文件', 'error');
+      return;
+    }
+    if (!this.newThaModel.displayName.trim()) {
+      showNotification('请输入模型显示名称', 'error');
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append('file', this.newThaModel.file);
+    formData.append('display_name', this.newThaModel.displayName.trim());
+
+    try {
+      const response = await fetch('/upload_tha_model', {
+        method: 'POST',
+        body: formData
+      });
+      const result = await response.json();
+
+      if (result.success) {
+        const newModelOption = {
+          id: result.model.id,
+          name: result.model.name,
+          type: 'user'
+        };
+        this.THAConfig.userModels.push(newModelOption);
+        this.cancelTHAModelUpload();
+        await this.autoSaveSettings();
+        showNotification('THA模型上传成功');
+        await this.loadTHAModels();
+      } else {
+        showNotification(`上传失败: ${result.message}`, 'error');
+      }
+    } catch (error) {
+      console.error('上传THA模型失败:', error);
+      showNotification('上传失败，请检查网络连接', 'error');
+    }
+  },
+
+  async deleteTHAModel(modelId) {
+    try {
+      const modelIndex = this.THAConfig.userModels.findIndex(
+        model => model.id === modelId
+      );
+      if (modelIndex === -1) {
+        showNotification('无法删除默认模型', 'error');
+        return;
+      }
+
+      const response = await fetch(`/delete_tha_model/${modelId}`, {
+        method: 'DELETE'
+      });
+      const result = await response.json();
+
+      if (result.success) {
+        this.THAConfig.userModels.splice(modelIndex, 1);
+        if (this.THAConfig.selectedModelId === modelId) {
+          if (this.THAConfig.defaultModels.length > 0) {
+            this.THAConfig.selectedModelId = this.THAConfig.defaultModels[0].id;
+          } else {
+            this.THAConfig.selectedModelId = '';
+          }
+        }
+        await this.autoSaveSettings();
+        showNotification('THA模型已删除');
+      } else {
+        showNotification(`删除失败: ${result.message}`, 'error');
+      }
+    } catch (error) {
+      console.error('删除THA模型失败:', error);
+      showNotification('删除失败，请稍后再试', 'error');
+    }
+  },
+
+  async loadTHAModels() {
+    try {
+      const [defaultRes, userRes] = await Promise.all([
+        fetch('/get_default_tha_models'),
+        fetch('/get_user_tha_models')
+      ]);
+      const defaultData = await defaultRes.json();
+      const userData = await userRes.json();
+
+      if (defaultData.success) {
+        this.THAConfig.defaultModels = defaultData.models;
+      }
+      if (userData.success) {
+        this.THAConfig.userModels = userData.models;
+      }
+    } catch (error) {
+      console.error('加载THA模型列表失败:', error);
+    }
+  },
+
+  handleTHAModelFileDrop(event) {
+    const files = event.dataTransfer.files;
+    if (files.length > 0) {
+      this.newThaModel.file = files[0];
+      this.newThaModel.name = files[0].name;
+    }
+  },
+
+  browseTHAModelFile() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.zip';
+    input.onchange = (e) => {
+      if (e.target.files.length > 0) {
+        this.newThaModel.file = e.target.files[0];
+        this.newThaModel.name = e.target.files[0].name;
+      }
+    };
+    input.click();
+  },
+
+  cancelTHAModelUpload() {
+    this.newThaModel = { file: null, displayName: '' };
+    this.showThaModelDialog = false;
+  },
+
+  removeNewTHAModel() {
+    this.newThaModel.file = null;
+    this.newThaModel.name = '';
+  },
+
   // 获取当前选中的模型信息
   getCurrentSelectedModel() {
     // 先在默认模型中查找

@@ -85,7 +85,7 @@ CLI Agent需要查看[README_AGENT.md](https://raw.githubusercontent.com/hesheng
 将这个链接发给你的AI，AI会引导你安装本软件！
 
 ```
-https://raw.githubusercontent.com/heshengtao/super-agent-party/main/README_AGENT.md
+curl -fsSL https://raw.githubusercontent.com/heshengtao/super-agent-party/main/README_AGENT.md
 ```
 
 ### windows整合包（推荐！免安装源码版本，支持一键同步到仓库最新版本，无需等待桌面版打包）
