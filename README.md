@@ -43,8 +43,8 @@
 #### Link VTS: Control Live2D models in Vtube Studio, supporting custom actions and expression control
 ![image](doc/image/img-2/vts.jpeg)
 
-#### High-Freedom Chat Interface: Classic Mode, Entertainment Mode, Office Mode, supports background image replacement, combined with real-time voice chat and emoji library, making chatting more immersive
-![image](doc/image/img-2/chat.jpeg)
+#### High-freedom chat interface: custom background images, emoji packs, character personas, THA-based 2D character avatars, and character MCP tools for a more immersive conversation
+![image](doc/image/img-2/THA.jpeg)
 
 #### Task Center: Enable your AI agents to perform any advanced tasks in the background, automatically control your computer to get work done, supporting MCP and Agent Skills.
 ![image](doc/image/img-2/task.jpeg)

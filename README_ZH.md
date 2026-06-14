@@ -42,8 +42,8 @@
 #### 链接VTS：控制Vtube studio中的live2d模型，支持自定义动作和表情控制
 ![image](doc/image/img-1/vts.jpeg)
 
-#### 高自由聊天界面：经典模式、娱乐模式、办公模式，支持替换背景图片，结合实时语音聊天和表情包库，让聊天更加沉浸
-![image](doc/image/img-1/chat.jpeg)
+#### 高自由聊天界面：自定义背景图片、表情包、角色人设、基于THA的2D角色形象、角色MCP工具，让聊天更加沉浸
+![image](doc/image/img-1/THA.jpeg)
 
 #### 任务中心：让你的AI智能体可以在后台执行任何高级任务，自动控制电脑帮你干活，支持 MCP 和 Agent Skills
 ![image](doc/image/img-1/task.jpeg)
