@@ -205,13 +205,13 @@ class THAPoseGenerator:
         mx, my = self.mx, self.my
 
         # body follows mouse
-        p[42] = -mx * 0.45
-        p[43] = my * 0.35
-        p[39] = idle_hx - my * 1.10
-        p[40] = idle_hy - mx * 0.90
+        p[42] = -mx * 0.75           # body_y 左右扭转 ← 水平鼠标
+        p[43] = 0.0                  # body_z 静止，避免 Z 轴旋转
+        p[39] = idle_hx - my * 1.10  # head_x ← 垂直鼠标
+        p[40] = idle_hy - mx * 0.90  # head_y ← 水平鼠标
         p[41] = idle_nk
-        p[37] = idle_ix - my * 0.85
-        p[38] = idle_iy - mx * 0.95
+        p[37] = idle_ix - my * 0.85  # eye ← 垂直鼠标
+        p[38] = idle_iy - mx * 0.95  # eye ← 水平鼠标
 
         # blinking — 闭眼状态下暂停眨眼
         eyes_closed_by_emotion = max(self._emotion_target[18], self._emotion_target[19]) > 0.3
