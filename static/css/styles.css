@@ -6218,8 +6218,8 @@ hr.footnotes-sep {
 @keyframes stream-slide-in {
   0% {
     opacity: 0;
-    transform: translateY(5px) translateX(-5px);
-    filter: blur(2px);
+    transform: translateY(4px) translateX(-3px);
+    filter: blur(1px);
   }
   100% {
     opacity: 1;
@@ -6229,20 +6229,21 @@ hr.footnotes-sep {
 }
 
 /* 应用动画到 Markdown 的块级元素 */
-/* 注意：这里使用了 :not 排除已存在的元素，配合 morphdom 使用效果极佳 */
 .markdown-body > p,
 .markdown-body > ul,
 .markdown-body > ol,
 .markdown-body > table,
 .markdown-body > blockquote,
 .markdown-body > pre {
-  animation: stream-slide-in 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94) both;
+  animation: stream-slide-in 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94) both;
   transform-origin: left center;
+  will-change: transform, opacity, filter;
 }
 
 /* 列表项逐个出现 */
 .markdown-body li {
-  animation: stream-slide-in 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94) both;
+  animation: stream-slide-in 0.15s cubic-bezier(0.25, 0.46, 0.45, 0.94) both;
+  will-change: transform, opacity, filter;
 }
 
 /* 3. 光标特效 (仅在正在生成的最后一段显示) */
@@ -6267,6 +6268,24 @@ hr.footnotes-sep {
 @keyframes stream-blink {
   0%, 100% { opacity: 1; }
   50% { opacity: 0; }
+}
+
+/* Respect OS-level motion reduction preferences */
+@media (prefers-reduced-motion: reduce) {
+  .markdown-body > p,
+  .markdown-body > ul,
+  .markdown-body > ol,
+  .markdown-body > table,
+  .markdown-body > blockquote,
+  .markdown-body > pre,
+  .markdown-body li {
+    animation: none !important;
+    will-change: auto !important;
+  }
+  .streaming > *:last-child::after {
+    animation: none !important;
+    opacity: 1;
+  }
 }
 
 /* 4. 代码块防抖优化 */

@@ -230,48 +230,33 @@ def get_default_settings_sync():
 
 # ----------------- Agent Skills 初始化 -----------------
 
-async def _copy_default_skills():
-    """
-    将项目根目录的 skills/ 复制到 USER_DATA_DIR/skills/。
-    核心逻辑：若目标子目录已存在，则跳过该目录；不覆盖用户已有文件。
-    """
-    # 源目录：项目根目录下的 skills
+def _copy_default_skills_sync():
+    """同步复制默认技能目录（在独立线程中执行以避免阻塞事件循环）"""
     src_skills_root = os.path.join(base_path, 'skills')
-    # 目标目录：用户数据目录下的 skills
-    dst_skills_root = SKILLS_DIR  # 你在路径定义中已配置
-
-    # 如果源目录根本不存在，说明这个版本没带默认技能，直接跳过
+    dst_skills_root = SKILLS_DIR
     if not os.path.isdir(src_skills_root):
         logging.info("[Skills] 项目根目录无 skills/ 文件夹，跳过初始化复制。")
         return
-
-    # 确保目标根目录存在（你在 dirs_to_create 已包含，这里双重保障）
     os.makedirs(dst_skills_root, exist_ok=True)
-
-    # 遍历源目录下的每一项（一级子目录/文件）
     try:
+        import shutil
         for item_name in os.listdir(src_skills_root):
             src_path = os.path.join(src_skills_root, item_name)
             dst_path = os.path.join(dst_skills_root, item_name)
-
-            # 仅处理目录 —— Skill 的根必须是文件夹
             if os.path.isdir(src_path):
-                # 核心判断：如果目标目录已存在，完全跳过该 Skill 的复制
                 if os.path.exists(dst_path):
                     logging.debug(f"[Skills] 目标技能已存在，跳过: {item_name}")
                     continue
-                
-                # 不存在则完整复制整个 Skill 文件夹
-                # 使用 shutil.copytree，且不覆盖（因为已判断不存在）
-                import shutil
                 shutil.copytree(src_path, dst_path)
                 logging.info(f"[Skills] 已安装默认技能: {item_name}")
             else:
-                # 源根目录下的孤立文件（非标准 Skill 结构），根据你的策略可忽略或复制
-                # 标准 Agent Skills 只认文件夹，这里建议忽略
                 logging.debug(f"[Skills] 忽略非文件夹项: {item_name}")
     except Exception as e:
         logging.error(f"[Skills] 复制默认技能时发生错误: {e}", exc_info=True)
+
+async def _copy_default_skills():
+    """异步包装：将技能复制操作卸载到独立线程"""
+    await asyncio.to_thread(_copy_default_skills_sync)
 
 # ----------------- 5. 初始化逻辑 -----------------
 
@@ -488,6 +473,70 @@ def _migrate_old_tha_models():
                 except Exception as e:
                     logging.warning(f"[Migration] 迁移THA模型失败 {entry}: {e}")
 
+def _cleanup_model_paths_sync(user_settings, has_changes):
+    """同步清理 VRM/THA 模型中文件不存在的残留条目（在独立线程中执行）"""
+    from urllib.parse import urlparse
+    
+    vrm_config = user_settings.get("VRMConfig", {})
+    vrm_user_models = vrm_config.get("userModels", [])
+    if vrm_user_models:
+        cleaned_vrm = []
+        for model in vrm_user_models:
+            model_path = model.get("path", "")
+            if model_path:
+                try:
+                    parsed = urlparse(model_path)
+                    local_path = os.path.join(UPLOAD_FILES_DIR, os.path.basename(parsed.path))
+                except Exception:
+                    local_path = os.path.join(UPLOAD_FILES_DIR, os.path.basename(model_path))
+                if os.path.exists(local_path):
+                    cleaned_vrm.append(model)
+                else:
+                    has_changes[0] = True
+                    logging.info(f"[Cleanup] 移除无效VRM模型条目: {model.get('name', model.get('id', ''))} (文件不存在: {local_path})")
+            else:
+                cleaned_vrm.append(model)
+        if len(cleaned_vrm) != len(vrm_user_models):
+            vrm_config["userModels"] = cleaned_vrm
+            selected_id = vrm_config.get("selectedModelId", "")
+            default_models = vrm_config.get("defaultModels", [])
+            if selected_id and not any(m.get("id") == selected_id for m in cleaned_vrm) and not any(m.get("id") == selected_id for m in default_models):
+                if default_models:
+                    vrm_config["selectedModelId"] = default_models[0].get("id", "alice")
+                elif cleaned_vrm:
+                    vrm_config["selectedModelId"] = cleaned_vrm[0].get("id", "alice")
+                else:
+                    vrm_config["selectedModelId"] = "alice"
+    
+    tha_config = user_settings.get("THAConfig", {})
+    tha_user_models = tha_config.get("userModels", [])
+    if tha_user_models:
+        cleaned_tha = []
+        for model in tha_user_models:
+            model_id = model.get("id", "")
+            if model_id:
+                tha_model_dir = os.path.join(THA_USER_MODELS_DIR, model_id)
+                onnx_file = os.path.join(tha_model_dir, "model.onnx")
+                if os.path.isdir(tha_model_dir) and os.path.exists(onnx_file):
+                    cleaned_tha.append(model)
+                else:
+                    has_changes[0] = True
+                    logging.info(f"[Cleanup] 移除无效THA模型条目: {model.get('name', model_id)} (目录不存在或缺少model.onnx)")
+            else:
+                cleaned_tha.append(model)
+        if len(cleaned_tha) != len(tha_user_models):
+            tha_config["userModels"] = cleaned_tha
+            selected_id = tha_config.get("selectedModelId", "")
+            default_models = tha_config.get("defaultModels", [])
+            all_tha = default_models + cleaned_tha
+            if selected_id and not any(m.get("id") == selected_id for m in all_tha):
+                if default_models:
+                    tha_config["selectedModelId"] = default_models[0].get("id", "")
+                elif cleaned_tha:
+                    tha_config["selectedModelId"] = cleaned_tha[0].get("id", "")
+                else:
+                    tha_config["selectedModelId"] = ""
+
 async def load_settings():
     await init_db()
     defaults = get_default_settings_sync().copy()
@@ -513,72 +562,13 @@ async def load_settings():
                 
                 merge_defaults(defaults, user_settings)
                 
-                # 清理 VRMConfig.userModels 中文件已不存在的残留条目
-                vrm_config = user_settings.get("VRMConfig", {})
-                vrm_user_models = vrm_config.get("userModels", [])
-                if vrm_user_models:
-                    cleaned_vrm = []
-                    for model in vrm_user_models:
-                        model_path = model.get("path", "")
-                        if model_path:
-                            try:
-                                from urllib.parse import urlparse
-                                parsed = urlparse(model_path)
-                                local_path = os.path.join(UPLOAD_FILES_DIR, os.path.basename(parsed.path))
-                            except Exception:
-                                local_path = os.path.join(UPLOAD_FILES_DIR, os.path.basename(model_path))
-                            if os.path.exists(local_path):
-                                cleaned_vrm.append(model)
-                            else:
-                                has_changes[0] = True
-                                logging.info(f"[Cleanup] 移除无效VRM模型条目: {model.get('name', model.get('id', ''))} (文件不存在: {local_path})")
-                        else:
-                            cleaned_vrm.append(model)
-                    if len(cleaned_vrm) != len(vrm_user_models):
-                        vrm_config["userModels"] = cleaned_vrm
-                        # 如果当前选中的模型也被清理了，重置为第一个默认模型
-                        selected_id = vrm_config.get("selectedModelId", "")
-                        default_models = vrm_config.get("defaultModels", [])
-                        if selected_id and not any(m.get("id") == selected_id for m in cleaned_vrm) and not any(m.get("id") == selected_id for m in default_models):
-                            if default_models:
-                                vrm_config["selectedModelId"] = default_models[0].get("id", "alice")
-                            elif cleaned_vrm:
-                                vrm_config["selectedModelId"] = cleaned_vrm[0].get("id", "alice")
-                            else:
-                                vrm_config["selectedModelId"] = "alice"
-                
-                # 清理 THAConfig.userModels 中目录已不存在的残留条目
-                tha_config = user_settings.get("THAConfig", {})
-                tha_user_models = tha_config.get("userModels", [])
-                if tha_user_models:
-                    cleaned_tha = []
-                    for model in tha_user_models:
-                        model_id = model.get("id", "")
-                        if model_id:
-                            tha_model_dir = os.path.join(THA_USER_MODELS_DIR, model_id)
-                            onnx_file = os.path.join(tha_model_dir, "model.onnx")
-                            if os.path.isdir(tha_model_dir) and os.path.exists(onnx_file):
-                                cleaned_tha.append(model)
-                            else:
-                                has_changes[0] = True
-                                logging.info(f"[Cleanup] 移除无效THA模型条目: {model.get('name', model_id)} (目录不存在或缺少model.onnx)")
-                        else:
-                            cleaned_tha.append(model)
-                    if len(cleaned_tha) != len(tha_user_models):
-                        tha_config["userModels"] = cleaned_tha
-                        selected_id = tha_config.get("selectedModelId", "")
-                        default_models = tha_config.get("defaultModels", [])
-                        all_tha = default_models + cleaned_tha
-                        if selected_id and not any(m.get("id") == selected_id for m in all_tha):
-                            if default_models:
-                                tha_config["selectedModelId"] = default_models[0].get("id", "")
-                            elif cleaned_tha:
-                                tha_config["selectedModelId"] = cleaned_tha[0].get("id", "")
-                            else:
-                                tha_config["selectedModelId"] = ""
+                # 清理 VRMConfig.userModels 和 THAConfig.userModels 中文件已不存在的残留条目（线程化避免阻塞事件循环）
+                await asyncio.to_thread(
+                    _cleanup_model_paths_sync, user_settings, has_changes
+                )
                 
                 # 迁移旧版THA模型: 从 uploaded_files/根目录 迁移到 uploaded_files/tha_models/
-                _migrate_old_tha_models()
+                await asyncio.to_thread(_migrate_old_tha_models)
                 
                 if has_changes[0]:
                     asyncio.create_task(save_settings(user_settings))

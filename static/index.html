@@ -10,20 +10,16 @@
   <link rel="stylesheet" href="css/github-markdown.min.css">
   <!-- Highlight.js CSS for code highlighting -->
   <link rel="stylesheet" href="css/github.min.css">
-  <script src="libs/clipboard.min.js"></script>
+  <script src="libs/clipboard.min.js" defer></script>
   <!--引入html2canvas-->
-  <script src="libs/html2canvas.min.js"></script>
+  <script src="libs/html2canvas.min.js" defer></script>
   <!-- 引入Element Plus样式 -->
   <link rel="stylesheet" href="libs/element-plus.css">
   <link rel="stylesheet" href="fontawesome/css/all.min.css">
   <link rel="icon" href="source/icon.png" type="image/png">
-  <!-- Voice Activation Detection -->
-  <script src="libs/ort.js"></script>
-  <script src="libs/bundle.min.js"></script>
-  <script src="libs/qrcode.min.js"></script>
-  <script src="libs/driver.js"></script>
+  <script src="libs/qrcode.min.js" defer></script>
+  <script src="libs/driver.js" defer></script>
   <link rel="stylesheet" href="libs/driver.css">
-  <script src="libs/exceljs.min.js"></script>
   <script>
     console.log(`
      _       ____   _____   _   _   _____ 
@@ -134,14 +130,33 @@ function updateElement(el, rawMarkdown, formatFn) {
   <script src="js/locales/zh-CN.js"></script>
   <script src="js/locales/en-US.js"></script>
   <script src="js/locales.js"></script>
-  <script src="libs/mermaid.min.js"></script>
-  <script src="libs/uuid.min.js"></script>
+  <script src="libs/uuid.min.js" defer></script>
+  <!-- 非首屏重量级库：通过 idle callback 延迟加载 -->
   <script>
-    mermaid.initialize({ 
-      startOnLoad: false,
-      securityLevel: 'loose',
-      theme: 'default',
-    });
+    var _deferredScripts = [
+      { src: 'libs/ort.js', onload: null },
+      { src: 'libs/bundle.min.js', onload: null },
+      { src: 'libs/exceljs.min.js', onload: null },
+      { src: 'libs/mermaid.min.js', onload: function() {
+        if (window.mermaid) {
+          mermaid.initialize({ startOnLoad: false, securityLevel: 'loose', theme: 'default' });
+        }
+      }}
+    ];
+    function _loadDeferredScripts() {
+      _deferredScripts.forEach(function(item) {
+        var s = document.createElement('script');
+        s.src = item.src;
+        s.async = false;
+        if (item.onload) s.onload = item.onload;
+        document.head.appendChild(s);
+      });
+    }
+    if ('requestIdleCallback' in window) {
+      requestIdleCallback(_loadDeferredScripts, { timeout: 3000 });
+    } else {
+      setTimeout(_loadDeferredScripts, 200);
+    }
   </script>
 </head>
 <body>
@@ -4127,7 +4142,7 @@ function updateElement(el, rawMarkdown, formatFn) {
                         @change="fetchTetosNewVoices(newTTSConfig.engine)"
                       >
                         <el-option :label="t('moss-TTS')" value="moss"></el-option>
-                        <el-option :label="t('edgetts')" value="edgetts"></el-option>
+                        <el-option v-if="!isSteamBuild" :label="t('edgetts')" value="edgetts"></el-option>
                         <el-option :label="t('systemtts')" value="systemtts" ></el-option>
                         <el-option label="GPT Sovits" value="GSV"></el-option>
                         <el-option :label="t('openaiLikeTTS')" value="openai"></el-option>
@@ -4901,7 +4916,7 @@ function updateElement(el, rawMarkdown, formatFn) {
                       </div>
                     </div>
 
-                    <div class="tool-item" v-show="newTTSConfig.engine === 'edgetts'">
+                    <div class="tool-item" v-show="newTTSConfig.engine === 'edgetts' && !isSteamBuild">
                       <div class="tool-header">
                         <div class="header-left">
                           <span>
@@ -7195,7 +7210,7 @@ function updateElement(el, rawMarkdown, formatFn) {
                           @change="autoSaveSettings"
                           class="full-width-input"
                         >
-                          <el-option :label="t('pollinations')" value="pollinations" ></el-option>
+                          <el-option :label="t('pollinations')" value="pollinations" v-if="!isSteamBuild" ></el-option>
                           <el-option :label="t('openaiImageLike')" value="openai" ></el-option>
                           <el-option :label="t('openaiChatLike')" value="openaiChat" ></el-option>
                         </el-select>
@@ -7224,7 +7239,7 @@ function updateElement(el, rawMarkdown, formatFn) {
                       </el-alert>
                     </div>
                   </div>
-                  <div class="tool-item" v-show="text2imgSettings.engine === 'pollinations'">
+                  <div class="tool-item" v-show="text2imgSettings.engine === 'pollinations' && !isSteamBuild">
                     <div class="tool-header">
                       <div class="header-left">
                         <span>
@@ -7748,7 +7763,7 @@ function updateElement(el, rawMarkdown, formatFn) {
                           class="full-width-input"
                         >
                           <el-option :label="t('moss-TTS')" value="moss"></el-option>
-                          <el-option :label="t('edgetts')" value="edgetts" ></el-option>
+                          <el-option :label="t('edgetts')" value="edgetts" v-if="!isSteamBuild" ></el-option>
                           <el-option :label="t('systemtts')" value="systemtts" ></el-option>
                           <el-option label="GPT Sovits" value="GSV" ></el-option>
                           <el-option :label="t('openaiLikeTTS')" value="openai" ></el-option>
@@ -8647,7 +8662,7 @@ function updateElement(el, rawMarkdown, formatFn) {
                     </div>
                   </div>
 
-                  <div class="tool-item" v-show="ttsSettings.engine === 'edgetts'">
+                  <div class="tool-item" v-show="ttsSettings.engine === 'edgetts' && !isSteamBuild">
                     <div class="tool-header">
                       <div class="header-left">
                         <span>
@@ -10256,7 +10271,7 @@ function updateElement(el, rawMarkdown, formatFn) {
                           @change="autoSaveSettings"
                           class="full-width-input"
                         >
-                          <el-option label="DuckDuckGo" value="duckduckgo" ></el-option>
+                          <el-option label="DuckDuckGo" value="duckduckgo" v-if="!isSteamBuild" ></el-option>
                           <el-option label="SearXNG" value="searxng" ></el-option>
                           <el-option label="Tavily" value="tavily" ></el-option>
                           <el-option label="Bing" value="bing" ></el-option>
@@ -10293,7 +10308,7 @@ function updateElement(el, rawMarkdown, formatFn) {
                       </el-form-item>
                     </div>
                   </div>
-                  <div class="tool-item" v-show="webSearchSettings.engine === 'duckduckgo'">
+                  <div class="tool-item" v-show="webSearchSettings.engine === 'duckduckgo' && !isSteamBuild">
                     <div class="tool-header">
                       <div class="header-left">
                         <span>
@@ -10730,7 +10745,7 @@ function updateElement(el, rawMarkdown, formatFn) {
                       <el-form-item :label="t('apiKey')" class="form-item-align">
                         <el-input
                           v-model="webSearchSettings.jina_api_key"
-                          :placeholder="t('jinaAPIKeyPlaceholder')"
+                          :placeholder="t(isSteamBuild ? 'jinaAPIKeyPlaceholderRequired' : 'jinaAPIKeyPlaceholder')"
                           show-password
                           @input="autoSaveSettings"
                           class="full-width-input"
@@ -12361,6 +12376,18 @@ function updateElement(el, rawMarkdown, formatFn) {
                         </div>
                       </template>
                     </el-alert>
+                  </div>
+
+                  <!-- 内容安全过滤 -->
+                  <div class="tool-item">
+                    <div class="tool-header">
+                      <span>
+                        <el-icon><i class="fa-solid fa-shield-halved"></i></el-icon>
+                        {{ t('contentSafety') }}
+                      </span>
+                      <el-switch v-model="systemSettings.contentSafety" @change="autoSaveSettings" :disabled="isSteamBuild"></el-switch>
+                    </div>
+                    <span class="tool-desc">{{ t('contentSafetyNotice') }}</span>
                   </div>
 
                   <!-- 数据存储路径设置 -->

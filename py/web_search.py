@@ -3,13 +3,12 @@ import json
 import os
 import time
 from bs4 import BeautifulSoup
-from langchain_community.tools import DuckDuckGoSearchResults
 import requests
-from tavily import TavilyClient
 from py.get_setting import load_settings
 from py.load_files import check_robots_txt
 
 async def DDGsearch(query):
+    from langchain_community.tools import DuckDuckGoSearchResults
     settings = await load_settings()
     def sync_search():
         max_results = settings['webSearch']['duckduckgo_max_results'] or 10
@@ -202,6 +201,7 @@ bochaai_tool = {
 }
 
 async def Tavily_search(query):
+    from tavily import TavilyClient
     settings = await load_settings()
     def sync_search():
         max_results = settings['webSearch']['tavily_max_results'] or 10
@@ -454,6 +454,9 @@ serper_tool = {
 
 async def jina_crawler(original_url):
     settings = await load_settings()
+    jina_api_key = settings['webSearch'].get('jina_api_key', "")
+    if os.environ.get("IS_STEAM_BUILD", "0") == "1" and not jina_api_key.strip():
+        return "Jina API Key 未配置。请在设置中填入你的 Jina API Key。Jina API Key is required in this build."
     def sync_crawler():
         detail_url = "https://r.jina.ai/"
         url = f"{detail_url}{original_url}"

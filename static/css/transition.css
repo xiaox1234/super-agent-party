@@ -26,3 +26,13 @@ body.content-loaded .main-container {
 body.content-loaded #app {
   animation: fadeIn 0.5s ease-in-out;
 }
+
+@media (prefers-reduced-motion: reduce) {
+  body {
+    opacity: 1;
+    transition: none;
+  }
+  body.content-loaded #app {
+    animation: none;
+  }
+}

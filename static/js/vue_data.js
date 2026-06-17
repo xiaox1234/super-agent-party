@@ -1,4 +1,5 @@
 const isElectron = window.electronAPI ? true : false;
+const isSteamBuild = window.__IS_STEAM_BUILD__ || false;
 // 事件监听改造
 if (isElectron) {
     document.addEventListener('contextmenu', (e) => {
@@ -85,6 +86,7 @@ let vue_data = {
     isdocker: false,
     isExpanded: true,
     isElectron: isElectron,
+    isSteamBuild: isSteamBuild,
     isCollapse: true,
     isBtnCollapse: true,
     activeMenu: 'dashboard',
@@ -273,10 +275,6 @@ let vue_data = {
       },
       autoBehavior: {
         enabled: false
-      },
-      randomTopic: {
-        enabled: false,
-        baseURL:'https://topics-after-party.zeabur.app'
       },
     },
     toolForShowInfo: {"name": "", "description": ""},
@@ -508,7 +506,8 @@ let vue_data = {
       chatMode: 'standard', 
       githubProxy: '', 
       backgroundURL: '',
-      bgHistoryList: [], // <--- 新增：历史背景图列表
+      bgHistoryList: [],
+      contentSafety: false,
     },
     saveBgDialogVisible: false,
     newBgName: '',

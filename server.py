@@ -8,6 +8,8 @@ import os
 import argparse
 import socket
 import errno
+
+_is_steam_build = os.environ.get("IS_STEAM_BUILD", "0") == "1"
 from py.cli_tool import read_file_tool_local
 from py.task_tools import query_task_progress
 from py.ws_manager import ws_manager
@@ -39,12 +41,12 @@ from py.utility_tools import (
     get_wikipedia_summary_and_sections, get_wikipedia_section_content, search_arxiv_papers,
 )
 from py.autoBehavior import auto_behavior_tool, auto_behavior
+from py.guard import load_safety_words, check_content_safety
 from py.cdp_tool import (
     all_cdp_tools, list_pages, navigate_page, new_page, close_page, select_page,
     take_snapshot, wait_for, click, fill, hover, press_key, evaluate_script,
     take_screenshot, fill_form, drag, handle_dialog,
 )
-from py.random_topic import random_topics_tools, get_random_topics, get_categories
 from py.computer_use_tool import (
     computer_use_tools, mouse_use_tools, keyboard_use_tools, desktopVision_use_tools,
     mouse_move, mouse_click, mouse_double_click, mouse_drag, mouse_scroll, mouse_hold,
@@ -249,9 +251,6 @@ os.environ['DYNAMIC_PORT'] = str(FINAL_PORT)
 from py.get_setting import change_port, reset_user_data_dir, set_custom_user_data_dir
 change_port(FINAL_PORT)
 
-# 核心：立刻打印！
-print(f"REAL_PORT_FOUND:{PORT}", flush=True)
-
 # ==========================================
 # 第二步：屏蔽掉后面库可能产生的骚扰警告
 # ==========================================
@@ -429,7 +428,7 @@ import time
 from typing import Any, AsyncIterator, List, Dict,Optional, Tuple, Union
 import shortuuid
 from py.mcp_clients import McpClient
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from concurrent.futures import ThreadPoolExecutor
 import aiofiles
 import argparse
@@ -496,7 +495,6 @@ mimetypes.add_type("image/svg+xml", ".svg")
 
 import platform
 import ctypes
-from PIL import Image, ImageDraw, ImageFont
 import io
 if platform.system() == "Windows":
     try:
@@ -505,11 +503,9 @@ if platform.system() == "Windows":
     except Exception:
         ctypes.windll.user32.SetProcessDPIAware()
 
-def draw_grid_on_image(image: Image.Image, grid_spacing: int = 10) -> Image.Image:
-    """
-    在图片上绘制网格和千分比坐标标签
-    grid_spacing: 每隔多少百分比画一根线，默认 10 (即 10x10 的网格)
-    """
+def draw_grid_on_image(image, grid_spacing: int = 10):
+    """在图片上绘制网格和千分比坐标标签"""
+    from PIL import ImageDraw
     draw = ImageDraw.Draw(image)
     width, height = image.size
     
@@ -536,15 +532,13 @@ def draw_grid_on_image(image: Image.Image, grid_spacing: int = 10) -> Image.Imag
         
     return image
 
-def draw_action_feedback(image: Image.Image, action_str: str) -> Image.Image:
+def draw_action_feedback(image, action_str: str):
     """
     解析返回结果字符串，并在图像上绘制动作反馈轨迹。
     （已针对红色网格优化，全面移除红色，使用高对比度的青/蓝/绿/黄色）
     """
-    # 强制将原始图像转换为 RGBA，以便使用半透明色彩
+    from PIL import ImageDraw, Image
     image = image.convert("RGBA")
-    
-    # 创建一个与原图同尺寸的透明涂层
     overlay = Image.new("RGBA", image.size, (255, 255, 255, 0))
     draw = ImageDraw.Draw(overlay)
     w, h = image.size
@@ -726,9 +720,6 @@ async def lifespan(app: FastAPI):
             # 彻底移除会导致崩溃的 socks 环境变量
             os.environ.pop(env_key, None)
 
-    # 基础初始化
-    await _copy_default_skills()
-    
     # 1. 准备所有独立的初始化任务
     from py.get_setting import init_db, init_covs_db, load_settings, save_settings
     from tzlocal import get_localzone
@@ -741,21 +732,30 @@ async def lifespan(app: FastAPI):
     load_locales_task = asyncio.to_thread(lambda: json.load(open(base_path + "/config/locales.json", "r", encoding="utf-8")))
     settings_task = load_settings() 
     timezone_task = asyncio.to_thread(get_localzone)
+    copy_skills_task = _copy_default_skills()
     
     results = await asyncio.gather(
         init_db_task, 
         init_covs_task, 
         load_locales_task, 
         settings_task, 
-        timezone_task
+        timezone_task,
+        copy_skills_task
     )
     
     # 2. 解包结果
     global settings, client, reasoner_client, fast_client, mcp_client_list, local_timezone, logger, locales, global_http_client,scheduler_task,sleep_guard
-    _, _, locales, settings, local_timezone = results
+    _, _, locales, settings, local_timezone, _ = results
     
     from py.sleep_guard import SleepGuard
     sleep_guard = SleepGuard(verbose=True)
+
+    load_safety_words()
+
+    if _is_steam_build:
+        settings.setdefault("systemSettings", {})
+        settings["systemSettings"]["contentSafety"] = True
+
     try:
         await asyncio.to_thread(sleep_guard.start)
         if sleep_guard.is_running():
@@ -917,6 +917,7 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(ws_manager.broadcast_settings_update(settings or {}))
 
     # --- [启动完成] ---
+    print(f"REAL_PORT_FOUND:{PORT}", flush=True)
     yield
 
     # --- [关闭逻辑] ---
@@ -940,6 +941,7 @@ async def lifespan(app: FastAPI):
 
     if scheduler_task:
         scheduler_task.cancel()
+    from py.node_runner import node_mgr
     ext_ids = list(node_mgr.exts.keys())
     for ext_id in ext_ids:
         try: await node_mgr.stop(ext_id)
@@ -973,6 +975,20 @@ async def cors_options_workaround(request: Request, call_next):
             }
         )
     return await call_next(request)
+
+@app.middleware("http")
+async def inject_steam_build_flag(request: Request, call_next):
+    response = await call_next(request)
+    if _is_steam_build and "text/html" in response.headers.get("content-type", ""):
+        body = b""
+        async for chunk in response.body_iterator:
+            body += chunk
+        body_str = body.decode("utf-8")
+        body_str = body_str.replace("</head>", '<script>window.__IS_STEAM_BUILD__=true;</script></head>')
+        headers = dict(response.headers)
+        headers.pop("content-length", None)
+        return HTMLResponse(content=body_str, status_code=response.status_code, headers=headers)
+    return response
 
 async def t(text: str) -> str:
     global locales
@@ -1108,7 +1124,6 @@ async def dispatch_tool(tool_name: str, tool_params: dict, settings: dict,is_sub
     from py.utility_tools import time
     # ==================== 1. 定义工具映射表 ====================
     _TOOL_HOOKS = {
-        "DDGsearch": DDGsearch,
         "searxng": searxng,
         "Tavily_search": Tavily_search,
         "query_knowledge_base": query_knowledge_base,
@@ -1120,7 +1135,6 @@ async def dispatch_tool(tool_name: str, tool_params: dict, settings: dict,is_sub
         "agent_tool_call": agent_tool_call,
         "a2a_tool_call": a2a_tool_call,
         "custom_llm_tool": custom_llm_tool,
-        "pollinations_image":pollinations_image,
         "get_file_content":get_file_content,
         "get_image_content": get_image_content,
         "e2b_code": e2b_code,
@@ -1158,8 +1172,6 @@ async def dispatch_tool(tool_name: str, tool_params: dict, settings: dict,is_sub
         "fill_form":fill_form,
         "drag": drag,
         "handle_dialog": handle_dialog,
-        "get_random_topics":get_random_topics,
-        "get_categories":get_categories,
         
         # Docker Sandbox 相关工具（原有）
         "docker_sandbox": docker_sandbox,
@@ -1219,6 +1231,10 @@ async def dispatch_tool(tool_name: str, tool_params: dict, settings: dict,is_sub
         "update_workspace_settings":update_workspace_settings,
         "acpx_agent":acpx_agent,
     }
+
+    if not _is_steam_build:
+        _TOOL_HOOKS["DDGsearch"] = DDGsearch
+        _TOOL_HOOKS["pollinations_image"] = pollinations_image
     
     # ==================== 3. 权限拦截逻辑 (Human-in-the-loop) ====================
     # 定义受控的敏感工具列表
@@ -3066,6 +3082,50 @@ def sanitize_tool_calls(messages: list) -> list:
 
     return msgs
 
+async def heartbeat_wrapper(gen, interval=90):
+    """Wraps an async generator to yield SSE heartbeat comments periodically,
+    preventing frontend read timeouts during long-thinking intervals."""
+    queue = asyncio.Queue()
+
+    async def reader():
+        try:
+            async for chunk in gen:
+                await queue.put(('data', chunk))
+        except Exception as e:
+            await queue.put(('error', e))
+        finally:
+            await queue.put(('done', None))
+
+    async def heartbeat():
+        try:
+            while True:
+                await asyncio.sleep(interval)
+                await queue.put(('heartbeat', None))
+        except asyncio.CancelledError:
+            pass
+
+    gen_task = asyncio.create_task(reader())
+    hb_task = asyncio.create_task(heartbeat())
+
+    try:
+        while True:
+            kind, payload = await queue.get()
+            if kind == 'data':
+                yield payload
+            elif kind == 'heartbeat':
+                yield ": heartbeat\n\n"
+            elif kind == 'error':
+                raise payload
+            elif kind == 'done':
+                break
+    finally:
+        hb_task.cancel()
+        gen_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await hb_task
+        with suppress(asyncio.CancelledError):
+            await gen_task
+
 async def generate_stream_response(client, reasoner_client, request: ChatRequest, settings: dict, 
                                    fastapi_base_url, enable_thinking, enable_deep_research, 
                                    enable_web_search, async_tools_id):
@@ -3448,12 +3508,10 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
         if settings["tools"]["wikipedia"]['enabled']:
             tools.append(wikipedia_summary_tool)
             tools.append(wikipedia_section_tool)
-        if settings["tools"]["randomTopic"]['enabled']:
-            tools.extend(random_topics_tools)
         if settings["tools"]["arxiv"]['enabled']:
             tools.append(arxiv_tool)
         if settings['text2imgSettings']['enabled']:
-            if settings['text2imgSettings']['engine'] == 'pollinations':
+            if settings['text2imgSettings']['engine'] == 'pollinations' and not _is_steam_build:
                 tools.append(pollinations_image_tool)
             elif settings['text2imgSettings']['engine'] == 'openai':
                 tools.append(openai_image_tool)
@@ -3887,7 +3945,7 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                             }
                             yield f"data: {json.dumps(tool_chunk)}\n\n"
                     if settings['webSearch']['when'] == 'after_thinking' or settings['webSearch']['when'] == 'both':
-                        if settings['webSearch']['engine'] == 'duckduckgo':
+                        if settings['webSearch']['engine'] == 'duckduckgo' and not _is_steam_build:
                             tools.append(duckduckgo_tool)
                         elif settings['webSearch']['engine'] == 'searxng':
                             tools.append(searxng_tool)
@@ -4336,6 +4394,12 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                     }
                     yield f"data: {json.dumps(final_chunk)}\n\n"
                     full_content += final_chunk["choices"][0]["delta"].get("content", "")
+                if settings.get("systemSettings", {}).get("contentSafety", False) and full_content:
+                    is_safe, matched = await check_content_safety(full_content)
+                    if not is_safe:
+                        correction = {"choices": [{"delta": {"content": "[该回复已被内容安全策略自动替换]", "_safety_filtered": True}}]}
+                        yield f"data: {json.dumps(correction)}\n\n"
+                        full_content = "[该回复已被内容安全策略自动替换]"
                 if not tool_calls:
                     # 将响应添加到消息列表
                     request.messages.append({
@@ -5147,6 +5211,12 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                         }
                         yield f"data: {json.dumps(final_chunk)}\n\n"
                         full_content += final_chunk["choices"][0]["delta"].get("content", "")
+                    if settings.get("systemSettings", {}).get("contentSafety", False) and full_content:
+                        is_safe, matched = await check_content_safety(full_content)
+                        if not is_safe:
+                            correction = {"choices": [{"delta": {"content": "[该回复已被内容安全策略自动替换]", "_safety_filtered": True}}]}
+                            yield f"data: {json.dumps(correction)}\n\n"
+                            full_content = "[该回复已被内容安全策略自动替换]"
                     if not tool_calls:
                         # 将响应添加到消息列表
                         request.messages.append({
@@ -5391,7 +5461,7 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                 return
         
         return StreamingResponse(
-            stream_generator(user_prompt, DRS_STAGE, tools, images),
+            heartbeat_wrapper(stream_generator(user_prompt, DRS_STAGE, tools, images)),
             media_type="text/event-stream",
             headers={
                 "Content-Type": "text/event-stream",
@@ -5617,8 +5687,6 @@ async def generate_complete_response(client,reasoner_client, request: ChatReques
             tools.extend(keyboard_use_tools)
         if not settings['visionControlSettings']['desktopVision']:
             tools.extend(desktopVision_use_tools)
-    if settings["tools"]["randomTopic"]['enabled']:
-        tools.extend(random_topics_tools)
     if settings['tools']['time']['enabled'] and settings['tools']['time']['triggerMode'] == 'afterThinking':
         tools.append(time_tool)
     if settings["tools"]["weather"]['enabled']:
@@ -5631,7 +5699,7 @@ async def generate_complete_response(client,reasoner_client, request: ChatReques
     if settings["tools"]["arxiv"]['enabled']:
         tools.append(arxiv_tool)
     if settings['text2imgSettings']['enabled']:
-        if settings['text2imgSettings']['engine'] == 'pollinations':
+        if settings['text2imgSettings']['engine'] == 'pollinations' and not _is_steam_build:
             tools.append(pollinations_image_tool)
         elif settings['text2imgSettings']['engine'] == 'openai':
             tools.append(openai_image_tool)
@@ -5889,7 +5957,7 @@ async def generate_complete_response(client,reasoner_client, request: ChatReques
                 if results:
                     content_append(request.messages, 'user',  f"\n\n联网搜索结果：{results}")
             if settings['webSearch']['when'] == 'after_thinking' or settings['webSearch']['when'] == 'both':
-                if settings['webSearch']['engine'] == 'duckduckgo':
+                if settings['webSearch']['engine'] == 'duckduckgo' and not _is_steam_build:
                     tools.append(duckduckgo_tool)
                 elif settings['webSearch']['engine'] == 'searxng':
                     tools.append(searxng_tool)
@@ -5908,7 +5976,7 @@ async def generate_complete_response(client,reasoner_client, request: ChatReques
                 elif settings['webSearch']['crawler'] == 'bochaai':
                     tools.append(bochaai_tool)
 
-                if settings['webSearch']['crawler'] == 'jina':
+                if settings['webSearch']['crawler'] == 'jina' and not _is_steam_build:
                     tools.append(jina_crawler_tool)
                 elif settings['webSearch']['crawler'] == 'crawl4ai':
                     tools.append(Crawl4Ai_tool)
@@ -6629,6 +6697,23 @@ async def chat_endpoint(request: ChatRequest, fastapi_request: Request):
     enable_deep_research = request.enable_deep_research or False
     enable_web_search = request.enable_web_search or False
     async_tools_id = request.asyncToolsID or None
+
+    current_settings = await load_settings()
+    if current_settings.get("systemSettings", {}).get("contentSafety", False):
+        all_text = ""
+        for msg in request.messages:
+            content = msg.get("content", "")
+            if isinstance(content, str):
+                all_text += " " + content
+            elif isinstance(content, list):
+                all_text += " " + " ".join(item.get("text", "") for item in content if isinstance(item, dict) and item.get("type") == "text")
+        is_safe, matched = await check_content_safety(all_text)
+        if not is_safe:
+            return JSONResponse(
+                status_code=403,
+                content={"error": {"message": "您的输入包含敏感内容，已被安全策略拦截。", "type": "content_safety", "code": 403}}
+            )
+
     await _apply_group_memory_context(request)
 
     if model == 'super-model':
@@ -6854,7 +6939,19 @@ async def simple_chat_endpoint(request: ChatRequest):
                                "type": "server_error", "code": 500}}
         )
 
-    # --------------- 无脑使用 fast_client ---------------
+    # safety check for all input including system prompt
+    if current_settings.get("systemSettings", {}).get("contentSafety", False):
+        all_text = ""
+        for msg in request.messages:
+            all_text += " " + (msg.content or "")
+        is_safe, matched = await check_content_safety(all_text)
+        if not is_safe:
+            return JSONResponse(
+                status_code=403,
+                content={"error": {"message": "您的输入包含敏感内容，已被安全策略拦截。",
+                                   "type": "content_safety", "code": 403}}
+            )
+
     fast_cfg = current_settings.get('fast', {})
     
     # 初始化或更新 fast_client
@@ -8291,6 +8388,8 @@ async def text_to_speech(request: Request):
         # 1. EdgeTTS 引擎
         # ==========================================
         if tts_engine == 'edgetts':
+            if _is_steam_build:
+                return JSONResponse({"error": "EdgeTTS is not available in this build"}, status_code=403)
             edgettsLanguage = tts_settings.get('edgettsLanguage', 'zh-CN')
             edgettsVoice = tts_settings.get('edgettsVoice', 'XiaoyiNeural')
             rate = tts_settings.get('edgettsRate', 1.0)
@@ -11286,6 +11385,14 @@ async def websocket_endpoint(websocket: WebSocket):
 
             elif msg_type == "save_settings":
                 settings_dict = data.get("data", {})
+                cur_settings = await load_settings()
+                if cur_settings.get("systemSettings", {}).get("contentSafety", False):
+                    sys_prompt = settings_dict.get("system_prompt", "")
+                    if sys_prompt:
+                        is_safe, matched = await check_content_safety(sys_prompt)
+                        if not is_safe:
+                            await ws_manager.send_json({"type": "error", "message": "系统提示词包含敏感内容，设置未保存。"}, websocket)
+                            break
                 await save_settings(settings_dict)
                 await sync_all_bots_behavior(settings_dict)
 
@@ -11299,7 +11406,26 @@ async def websocket_endpoint(websocket: WebSocket):
                 await ws_manager.broadcast_settings_update(settings_dict, exclude=websocket)
 
             elif msg_type == "save_conversations":
-                await save_covs(data.get("data", {}))
+                cov_data = data.get("data", {})
+                cur_settings = await load_settings()
+                if cur_settings.get("systemSettings", {}).get("contentSafety", False):
+                    covs = cov_data.get("conversations", [])
+                    for conv in covs:
+                        for msg in conv.get("messages", []):
+                            if msg.get("role") == "assistant":
+                                content = msg.get("content", "")
+                                if isinstance(content, str):
+                                    is_safe, matched = await check_content_safety(content)
+                                    if not is_safe:
+                                        msg["content"] = "[该回复已被内容安全策略自动替换]"
+                                        msg["_safety_filtered"] = True
+                                elif isinstance(content, list):
+                                    text = " ".join(item.get("text", "") for item in content if isinstance(item, dict) and item.get("type") == "text")
+                                    is_safe, matched = await check_content_safety(text)
+                                    if not is_safe:
+                                        msg["content"] = "[该回复已被内容安全策略自动替换]"
+                                        msg["_safety_filtered"] = True
+                await save_covs(cov_data)
                 await ws_manager.send_json({
                     "type": "conversations_saved",
                     "correlationId": data.get("correlationId"),
@@ -11349,6 +11475,12 @@ async def websocket_endpoint(websocket: WebSocket):
             elif msg_type == "set_system_prompt":
                 has_sent_prompt = True # 标记该连接发送过 Prompt
                 extension_system_prompt = data.get("data", {}).get("text", "")
+                cur_settings = await load_settings()
+                if cur_settings.get("systemSettings", {}).get("contentSafety", False):
+                    is_safe, matched = await check_content_safety(extension_system_prompt)
+                    if not is_safe:
+                        await ws_manager.send_json({"type": "error", "message": "系统提示词包含敏感内容，已被安全策略拦截。"}, websocket)
+                        break
                 await ws_manager.broadcast({
                     "type": "update_system_prompt",
                     "data": {
