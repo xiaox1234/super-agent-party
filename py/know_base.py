@@ -9,7 +9,6 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_classic.retrievers import EnsembleRetriever
 from langchain_community.retrievers import BM25Retriever
 from langchain_core.documents import Document
-from langchain_community.vectorstores import FAISS
 
 from py.load_files import get_files_json
 from py.get_setting import load_settings, base_path, KB_DIR
@@ -116,6 +115,7 @@ def chunk_documents(results: List[Dict], cur_kb) -> List[Document]:
 # 核心修改：增加容错和数据清洗
 async def build_vector_store(docs: List[Document], kb_id, cur_kb: Dict, cur_vendor: str):
     """构建并保存双索引"""
+    from langchain_community.vectorstores import FAISS
     if not isinstance(docs, list) or not all(isinstance(d, Document) for d in docs):
         raise ValueError("Input must be a list of Document objects")
     
@@ -196,6 +196,7 @@ async def build_vector_store(docs: List[Document], kb_id, cur_kb: Dict, cur_vend
 
 async def load_retrievers(kb_id, cur_kb, cur_vendor):
     """加载双检索器 (带 BM25 缺失的回退机制)"""
+    from langchain_community.vectorstores import FAISS
     kb_path = Path(KB_DIR) / str(kb_id)
     bm25_path = kb_path / "bm25_index.json"
     

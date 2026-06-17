@@ -3,13 +3,12 @@ import json
 import os
 import time
 from bs4 import BeautifulSoup
-from langchain_community.tools import DuckDuckGoSearchResults
 import requests
-from tavily import TavilyClient
 from py.get_setting import load_settings
 from py.load_files import check_robots_txt
 
 async def DDGsearch(query):
+    from langchain_community.tools import DuckDuckGoSearchResults
     settings = await load_settings()
     def sync_search():
         max_results = settings['webSearch']['duckduckgo_max_results'] or 10
@@ -202,6 +201,7 @@ bochaai_tool = {
 }
 
 async def Tavily_search(query):
+    from tavily import TavilyClient
     settings = await load_settings()
     def sync_search():
         max_results = settings['webSearch']['tavily_max_results'] or 10

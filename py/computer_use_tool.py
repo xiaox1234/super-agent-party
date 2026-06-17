@@ -6,24 +6,47 @@ import os
 from typing import List, Optional, Tuple
 from functools import wraps
 
-# ================== 核心修复：安全导入 GUI 库 ==================
+# ================== 核心修复：延迟导入 GUI 库 ==================
+_pag = None
+_pp = None
 GUI_AVAILABLE = False
-try:
-    import pyautogui
-    import pyperclip
-    # 开启安全防故障机制
-    pyautogui.FAILSAFE = True
-    pyautogui.PAUSE = 0.05
-    GUI_AVAILABLE = True
-except (KeyError, ImportError, Exception) as e:
-    # 如果在 Docker/无显示器环境中，忽略报错，只打印警告
-    print(f"⚠️ [Warning] 桌面鼠标键盘工具已禁用 (缺少 DISPLAY): {e}")
 
-# 拦截器：如果大模型在 Docker 里试图调用鼠标键盘，给它返回一句话，而不是让系统崩溃
+def _lazy_pag():
+    global _pag, GUI_AVAILABLE
+    if _pag is not None:
+        return _pag
+    import pyautogui
+    _lazy_pag().FAILSAFE = True
+    _lazy_pag().PAUSE = 0.05
+    _pag = pyautogui
+    GUI_AVAILABLE = True
+    return _pag
+
+def _lazy_pp():
+    global _pp
+    if _pp is not None:
+        return _pp
+    import pyperclip
+    _pp = pyperclip
+    return _pp
+
+def _check_gui():
+    if GUI_AVAILABLE:
+        return True
+    if _pag is not None:
+        return True
+    try:
+        _lazy_pag()
+        _lazy_pp()
+        return True
+    except (KeyError, ImportError, Exception) as e:
+        print(f"⚠️ [Warning] 桌面鼠标键盘工具已禁用 (缺少 DISPLAY): {e}")
+        return False
+
 def require_gui(func):
     @wraps(func)
     async def wrapper(*args, **kwargs):
-        if not GUI_AVAILABLE:
+        if not _check_gui():
             return "执行失败：当前系统运行在无头环境(如Docker)中，没有物理显示器，无法执行鼠标和键盘操作。"
         return await func(*args, **kwargs)
     return wrapper
@@ -54,7 +77,7 @@ def _percent_to_pixel(x_percent: float, y_percent: float) -> Tuple[int, int]:
         return px, py
         
     # 否则默认映射全屏坐标
-    width, height = pyautogui.size()
+    width, height = _lazy_pag().size()
     px = min(int(width * (x_percent / 1000)), width - 1)
     py = min(int(height * (y_percent / 1000)), height - 1)
     
@@ -70,7 +93,7 @@ async def mouse_move(x: float, y: float, duration: float = 0.5) -> str:
     px, py = _percent_to_pixel(x, y)
     
     def _move():
-        pyautogui.moveTo(px, py, duration=duration, tween=pyautogui.easeInOutQuad)
+        _lazy_pag().moveTo(px, py, duration=duration, tween=_lazy_pag().easeInOutQuad)
         time.sleep(0.02)
     
     await asyncio.to_thread(_move)
@@ -86,9 +109,9 @@ async def mouse_click(button: str = "left", clicks: int = 1, x: Optional[float] 
         
         def _click_at():
             px, py = _percent_to_pixel(x, y)
-            pyautogui.moveTo(px, py, duration=0.2)
+            _lazy_pag().moveTo(px, py, duration=0.2)
             time.sleep(0.2) 
-            pyautogui.click(x=px, y=py, clicks=clicks, button=button, interval=0.1)
+            _lazy_pag().click(x=px, y=py, clicks=clicks, button=button, interval=0.1)
             
         await asyncio.to_thread(_click_at)
         # 根据点击次数打上不同的标签
@@ -96,7 +119,7 @@ async def mouse_click(button: str = "left", clicks: int = 1, x: Optional[float] 
         return f"鼠标已移动到 ({x}‰, {y}‰) 并使用 {button} 键点击了 {clicks} 次。 [LAST_ACTION: {tag}]"
     else:
         # 如果没有传入坐标（原地点击），我们无法在图片上准确标出位置，所以不带坐标标签
-        await asyncio.to_thread(pyautogui.click, clicks=clicks, button=button, interval=0.1)
+        await asyncio.to_thread(_lazy_pag().click, clicks=clicks, button=button, interval=0.1)
         return f"鼠标在当前位置使用 {button} 键点击了 {clicks} 次。[LAST_ACTION: CLICK_CURRENT]"
 
 
@@ -109,14 +132,14 @@ async def mouse_double_click(button: str = "left", x: Optional[float] = None, y:
         
         def _double_click():
             px, py = _percent_to_pixel(x, y)
-            pyautogui.moveTo(px, py, duration=0.2)
+            _lazy_pag().moveTo(px, py, duration=0.2)
             time.sleep(0.2)
-            pyautogui.click(x=px, y=py, clicks=2, button=button, interval=0.1)
+            _lazy_pag().click(x=px, y=py, clicks=2, button=button, interval=0.1)
             
         await asyncio.to_thread(_double_click)
         return f"鼠标已移动到 ({x}‰, {y}‰) 并使用 {button} 键双击。 [LAST_ACTION: DOUBLE_CLICK({x},{y})]"
     else:
-        await asyncio.to_thread(pyautogui.click, clicks=2, button=button, interval=0.1)
+        await asyncio.to_thread(_lazy_pag().click, clicks=2, button=button, interval=0.1)
         return f"鼠标在当前位置使用 {button} 键双击。 [LAST_ACTION: CLICK_CURRENT]"
 
 
@@ -133,9 +156,9 @@ async def mouse_drag(x1: float, y1: float, x2: float, y2: float, duration: float
         px2, py2 = _percent_to_pixel(x2, y2)
         
         def _drag():
-            pyautogui.moveTo(px1, py1, duration=0.2)
+            _lazy_pag().moveTo(px1, py1, duration=0.2)
             time.sleep(0.2) 
-            pyautogui.dragTo(x=px2, y=py2, duration=duration, button=button, tween=pyautogui.easeInOutQuad)
+            _lazy_pag().dragTo(x=px2, y=py2, duration=duration, button=button, tween=_lazy_pag().easeInOutQuad)
             time.sleep(0.1)
             
         await asyncio.to_thread(_drag)
@@ -154,7 +177,7 @@ async def mouse_scroll(clicks: int) -> str:
         
         while remaining > 0:
             current_chunk = min(chunk_size, remaining)
-            pyautogui.scroll(current_chunk * direction)
+            _lazy_pag().scroll(current_chunk * direction)
             remaining -= current_chunk
             if remaining > 0:
                 time.sleep(0.01)
@@ -172,10 +195,10 @@ async def mouse_hold(button: str, duration: float) -> str:
     
     def _hold_logic():
         try:
-            pyautogui.mouseDown(button=button)
+            _lazy_pag().mouseDown(button=button)
             time.sleep(duration)
         finally:
-            pyautogui.mouseUp(button=button)
+            _lazy_pag().mouseUp(button=button)
     
     await asyncio.to_thread(_hold_logic)
     return f"已成功按住鼠标 {button} 键持续 {duration} 秒。[LAST_ACTION: HOLD]"
@@ -188,38 +211,38 @@ async def copy_to_input_box(text: str) -> str:
     def _type_text():
         old_clipboard = ""
         try:
-            old_clipboard = pyperclip.paste()
+            old_clipboard = _lazy_pp().paste()
         except Exception:
             pass
         
         sys_os = platform.system()
         
         try:
-            pyperclip.copy("")
-            pyperclip.copy(text)
+            _lazy_pp().copy("")
+            _lazy_pp().copy(text)
             wait_time = 0.2 if sys_os == "Windows" else 0.15
             time.sleep(wait_time)
             
             for i in range(3):
-                if pyperclip.paste() == text: break
+                if _lazy_pp().paste() == text: break
                 time.sleep(0.1)
-                pyperclip.copy(text)
+                _lazy_pp().copy(text)
             
             modifier = 'command' if sys_os == "Darwin" else 'ctrl'
             
             # 🌟 修复核心：显式按下修饰键并等待，确保操作系统队列 100% 确认 Ctrl/Cmd 处于被按住状态 🌟
-            pyautogui.keyDown(modifier)
+            _lazy_pag().keyDown(modifier)
             time.sleep(0.05)  # 50 毫秒的系统缓冲延迟，彻底阻断输入法或系统抢跑
-            pyautogui.press('v')
+            _lazy_pag().press('v')
             time.sleep(0.05)  # 释放前的短暂等待
-            pyautogui.keyUp(modifier)
+            _lazy_pag().keyUp(modifier)
             
             time.sleep(0.15)
         finally:
             time.sleep(0.05)
             for _ in range(2):
                 try:
-                    if old_clipboard: pyperclip.copy(old_clipboard)
+                    if old_clipboard: _lazy_pp().copy(old_clipboard)
                     break
                 except Exception:
                     time.sleep(0.05)
@@ -231,7 +254,7 @@ async def copy_to_input_box(text: str) -> str:
 async def keyboard_press(key: str, presses: int = 1) -> str:
     """按下单个按键多次"""
     def _press_logic():
-        pyautogui.press(key, presses=presses, interval=0.05)
+        _lazy_pag().press(key, presses=presses, interval=0.05)
     
     await asyncio.to_thread(_press_logic)
     return f"已按下键盘按键 '{key}' {presses} 次。"
@@ -245,7 +268,7 @@ async def keyboard_sequence(keys: List[str]) -> str:
 
     def _sequence_logic():
         for i, key in enumerate(keys):
-            pyautogui.press(key)
+            _lazy_pag().press(key)
             # 如果不是最后一个按键，则等待 0.5 秒
             if i < len(keys) - 1:
                 time.sleep(0.5)
@@ -260,13 +283,13 @@ async def keyboard_hotkey(keys: List[str]) -> str:
     
     def _hotkey():
         if len(keys) == 1:
-            pyautogui.press(keys[0])
+            _lazy_pag().press(keys[0])
         else:
             modifier = keys[0]
             rest_keys = keys[1:]
-            with pyautogui.hold(modifier):
+            with _lazy_pag().hold(modifier):
                 for k in rest_keys:
-                    pyautogui.press(k)
+                    _lazy_pag().press(k)
                     time.sleep(0.02)
     
     await asyncio.to_thread(_hotkey)
@@ -282,7 +305,7 @@ async def keyboard_hold(keys: List[str], duration: float) -> str:
         start_time = time.time()
         try:
             for key in keys:
-                pyautogui.keyDown(key)
+                _lazy_pag().keyDown(key)
                 time.sleep(0.02)
             
             elapsed = 0
@@ -295,7 +318,7 @@ async def keyboard_hold(keys: List[str], duration: float) -> str:
         finally:
             for key in reversed(keys):
                 try:
-                    pyautogui.keyUp(key)
+                    _lazy_pag().keyUp(key)
                     time.sleep(0.02)
                 except Exception:
                     pass

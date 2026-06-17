@@ -10,20 +10,16 @@
   <link rel="stylesheet" href="css/github-markdown.min.css">
   <!-- Highlight.js CSS for code highlighting -->
   <link rel="stylesheet" href="css/github.min.css">
-  <script src="libs/clipboard.min.js"></script>
+  <script src="libs/clipboard.min.js" defer></script>
   <!--引入html2canvas-->
-  <script src="libs/html2canvas.min.js"></script>
+  <script src="libs/html2canvas.min.js" defer></script>
   <!-- 引入Element Plus样式 -->
   <link rel="stylesheet" href="libs/element-plus.css">
   <link rel="stylesheet" href="fontawesome/css/all.min.css">
   <link rel="icon" href="source/icon.png" type="image/png">
-  <!-- Voice Activation Detection -->
-  <script src="libs/ort.js"></script>
-  <script src="libs/bundle.min.js"></script>
-  <script src="libs/qrcode.min.js"></script>
-  <script src="libs/driver.js"></script>
+  <script src="libs/qrcode.min.js" defer></script>
+  <script src="libs/driver.js" defer></script>
   <link rel="stylesheet" href="libs/driver.css">
-  <script src="libs/exceljs.min.js"></script>
   <script>
     console.log(`
      _       ____   _____   _   _   _____ 
@@ -134,14 +130,33 @@ function updateElement(el, rawMarkdown, formatFn) {
   <script src="js/locales/zh-CN.js"></script>
   <script src="js/locales/en-US.js"></script>
   <script src="js/locales.js"></script>
-  <script src="libs/mermaid.min.js"></script>
-  <script src="libs/uuid.min.js"></script>
+  <script src="libs/uuid.min.js" defer></script>
+  <!-- 非首屏重量级库：通过 idle callback 延迟加载 -->
   <script>
-    mermaid.initialize({ 
-      startOnLoad: false,
-      securityLevel: 'loose',
-      theme: 'default',
-    });
+    var _deferredScripts = [
+      { src: 'libs/ort.js', onload: null },
+      { src: 'libs/bundle.min.js', onload: null },
+      { src: 'libs/exceljs.min.js', onload: null },
+      { src: 'libs/mermaid.min.js', onload: function() {
+        if (window.mermaid) {
+          mermaid.initialize({ startOnLoad: false, securityLevel: 'loose', theme: 'default' });
+        }
+      }}
+    ];
+    function _loadDeferredScripts() {
+      _deferredScripts.forEach(function(item) {
+        var s = document.createElement('script');
+        s.src = item.src;
+        s.async = false;
+        if (item.onload) s.onload = item.onload;
+        document.head.appendChild(s);
+      });
+    }
+    if ('requestIdleCallback' in window) {
+      requestIdleCallback(_loadDeferredScripts, { timeout: 3000 });
+    } else {
+      setTimeout(_loadDeferredScripts, 200);
+    }
   </script>
 </head>
 <body>

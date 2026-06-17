@@ -249,9 +249,6 @@ os.environ['DYNAMIC_PORT'] = str(FINAL_PORT)
 from py.get_setting import change_port, reset_user_data_dir, set_custom_user_data_dir
 change_port(FINAL_PORT)
 
-# 核心：立刻打印！
-print(f"REAL_PORT_FOUND:{PORT}", flush=True)
-
 # ==========================================
 # 第二步：屏蔽掉后面库可能产生的骚扰警告
 # ==========================================
@@ -496,7 +493,6 @@ mimetypes.add_type("image/svg+xml", ".svg")
 
 import platform
 import ctypes
-from PIL import Image, ImageDraw, ImageFont
 import io
 if platform.system() == "Windows":
     try:
@@ -505,11 +501,9 @@ if platform.system() == "Windows":
     except Exception:
         ctypes.windll.user32.SetProcessDPIAware()
 
-def draw_grid_on_image(image: Image.Image, grid_spacing: int = 10) -> Image.Image:
-    """
-    在图片上绘制网格和千分比坐标标签
-    grid_spacing: 每隔多少百分比画一根线，默认 10 (即 10x10 的网格)
-    """
+def draw_grid_on_image(image, grid_spacing: int = 10):
+    """在图片上绘制网格和千分比坐标标签"""
+    from PIL import ImageDraw
     draw = ImageDraw.Draw(image)
     width, height = image.size
     
@@ -536,15 +530,13 @@ def draw_grid_on_image(image: Image.Image, grid_spacing: int = 10) -> Image.Imag
         
     return image
 
-def draw_action_feedback(image: Image.Image, action_str: str) -> Image.Image:
+def draw_action_feedback(image, action_str: str):
     """
     解析返回结果字符串，并在图像上绘制动作反馈轨迹。
     （已针对红色网格优化，全面移除红色，使用高对比度的青/蓝/绿/黄色）
     """
-    # 强制将原始图像转换为 RGBA，以便使用半透明色彩
+    from PIL import ImageDraw, Image
     image = image.convert("RGBA")
-    
-    # 创建一个与原图同尺寸的透明涂层
     overlay = Image.new("RGBA", image.size, (255, 255, 255, 0))
     draw = ImageDraw.Draw(overlay)
     w, h = image.size
@@ -726,9 +718,6 @@ async def lifespan(app: FastAPI):
             # 彻底移除会导致崩溃的 socks 环境变量
             os.environ.pop(env_key, None)
 
-    # 基础初始化
-    await _copy_default_skills()
-    
     # 1. 准备所有独立的初始化任务
     from py.get_setting import init_db, init_covs_db, load_settings, save_settings
     from tzlocal import get_localzone
@@ -741,18 +730,20 @@ async def lifespan(app: FastAPI):
     load_locales_task = asyncio.to_thread(lambda: json.load(open(base_path + "/config/locales.json", "r", encoding="utf-8")))
     settings_task = load_settings() 
     timezone_task = asyncio.to_thread(get_localzone)
+    copy_skills_task = _copy_default_skills()
     
     results = await asyncio.gather(
         init_db_task, 
         init_covs_task, 
         load_locales_task, 
         settings_task, 
-        timezone_task
+        timezone_task,
+        copy_skills_task
     )
     
     # 2. 解包结果
     global settings, client, reasoner_client, fast_client, mcp_client_list, local_timezone, logger, locales, global_http_client,scheduler_task,sleep_guard
-    _, _, locales, settings, local_timezone = results
+    _, _, locales, settings, local_timezone, _ = results
     
     from py.sleep_guard import SleepGuard
     sleep_guard = SleepGuard(verbose=True)
@@ -917,6 +908,7 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(ws_manager.broadcast_settings_update(settings or {}))
 
     # --- [启动完成] ---
+    print(f"REAL_PORT_FOUND:{PORT}", flush=True)
     yield
 
     # --- [关闭逻辑] ---
@@ -940,6 +932,7 @@ async def lifespan(app: FastAPI):
 
     if scheduler_task:
         scheduler_task.cancel()
+    from py.node_runner import node_mgr
     ext_ids = list(node_mgr.exts.keys())
     for ext_id in ext_ids:
         try: await node_mgr.stop(ext_id)
