@@ -722,7 +722,12 @@ screenshot_tool = {
     "type": "function",
     "function": {
         "name": "screenshot",
-        "description": "截取带有千分比辅助网格的当前桌面的图像"
+        "description": "截取带有千分比辅助网格的当前桌面的图像",
+        "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": []
+        }
     }
 }
 
