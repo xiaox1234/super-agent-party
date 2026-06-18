@@ -2137,8 +2137,11 @@ formatMessage(content, index) {
           this.modelProviders = data.data.modelProviders || this.modelProviders;
           this.systemSettings = data.data.systemSettings || this.systemSettings;
           if (isSteamBuild && !this.systemSettings.contentSafety) this.systemSettings.contentSafety = true;
-          if (this.systemSettings && (this.systemSettings.fontScale === undefined || this.systemSettings.fontScale === null)) {
-            this.systemSettings.fontScale = 1;
+          if (this.systemSettings && (this.systemSettings.autoCollapseInput === undefined || this.systemSettings.autoCollapseInput === null)) {
+            this.systemSettings.autoCollapseInput = false;
+          }
+          if (isSteamBuild || (this.systemSettings.showDisclaimer !== false && !this.systemSettings.disclaimerAccepted)) {
+            this.showDisclaimerDialog = true;
           }
           if (this.systemSettings && (this.systemSettings.codeFontScale === undefined || this.systemSettings.codeFontScale === null)) {
             this.systemSettings.codeFontScale = 1;
@@ -19572,6 +19575,16 @@ gotoAddExtension(){
       
       // 使用 showNotification 提示删除成功
       showNotification(this.t('bgRemovedSuccess'), 'success');
+    },
+
+    acceptDisclaimer() {
+      this.showDisclaimerDialog = false;
+      if (isSteamBuild) { return; }
+      if (this.disclaimerAccepted) {
+        this.systemSettings.disclaimerAccepted = true;
+        this.systemSettings.showDisclaimer = false;
+        this.autoSaveSettings();
+      }
     },
   
 }
