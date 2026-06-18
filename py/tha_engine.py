@@ -520,15 +520,25 @@ class THAModelManager:
             os.makedirs(directory, exist_ok=True)
             return models
 
+        is_mac = (sys.platform == 'darwin')
+
         for entry in os.listdir(directory):
             entry_path = os.path.join(directory, entry)
             if os.path.isdir(entry_path):
-                onnx_path = os.path.join(entry_path, "model.onnx")
-                if os.path.exists(onnx_path):
+                model_path = None
+                if is_mac:
+                    mlp_path = os.path.join(entry_path, "model.mlpackage")
+                    if os.path.isdir(mlp_path):
+                        model_path = mlp_path
+                if model_path is None:
+                    onnx_path = os.path.join(entry_path, "model.onnx")
+                    if os.path.exists(onnx_path):
+                        model_path = onnx_path
+                if model_path:
                     models.append({
                         "id": entry,
                         "name": entry,
-                        "modelPath": os.path.join(entry_path, "model.onnx"),
+                        "modelPath": model_path,
                         "type": model_type
                     })
         models.sort(key=lambda x: x["name"])
@@ -623,7 +633,6 @@ class THAModelManager:
             onnx_path = os.path.join(target_dir, "model.onnx")
             mlpkg_paths = list(Path(target_dir).rglob("*.mlpackage"))
             if not os.path.exists(onnx_path) and not mlpkg_paths:
-                return False
                 return False
             import shutil
             shutil.rmtree(target_dir)

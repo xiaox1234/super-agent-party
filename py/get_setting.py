@@ -462,7 +462,8 @@ def _migrate_old_tha_models():
             continue
         # 检查是否包含 THA 模型文件
         onnx_file = os.path.join(entry_path, "model.onnx")
-        if os.path.exists(onnx_file):
+        mlp_dir = os.path.join(entry_path, "model.mlpackage")
+        if os.path.exists(onnx_file) or os.path.isdir(mlp_dir):
             dest = os.path.join(target_dir, entry)
             if not os.path.exists(dest):
                 try:
@@ -516,7 +517,8 @@ def _cleanup_model_paths_sync(user_settings, has_changes):
             if model_id:
                 tha_model_dir = os.path.join(THA_USER_MODELS_DIR, model_id)
                 onnx_file = os.path.join(tha_model_dir, "model.onnx")
-                if os.path.isdir(tha_model_dir) and os.path.exists(onnx_file):
+                mlp_dir = os.path.join(tha_model_dir, "model.mlpackage")
+                if os.path.isdir(tha_model_dir) and (os.path.exists(onnx_file) or os.path.isdir(mlp_dir)):
                     cleaned_tha.append(model)
                 else:
                     has_changes[0] = True
