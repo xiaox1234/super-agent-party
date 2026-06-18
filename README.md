@@ -298,7 +298,9 @@ Please refer to the following document for the main functions:
 | --- | --- |
 | Supported Model Service Providers | Supports common local deployment engine interfaces and cloud service provider interfaces, such as: openai/ollama/dify, etc. |
 | Multimodal Model Integration | Integrates various types of models including role-playing, reasoning, vision, image generation, speech recognition, and speech synthesis for combined use. |
-| VRM Desktop Pet Robot | Highly customizable with support for custom avatars, custom animations, voice interaction, and dialogue interruption.It can be streamed transparently to screen recording software such as OBS, and supports bidirectional VMC protocol! |
+| VRM Desktop Pet Robot | Highly customizable with support for custom avatars, custom animations, voice interaction, and dialogue interruption. It can be streamed transparently to screen recording software such as OBS, and supports bidirectional VMC protocol! |
+| THA Desktop Pet Robot | Live2D-style talking head animated by audio-driven blendshapes, with real-time voice synthesis and interruptible conversation, transparent overlay compatible with OBS! |
+| Link VTS | Control Live2D models in Vtube Studio with real-time expression sync, custom animations, and voice-driven lip-sync interaction! |
 | Messaging Platform Bots | Currently supports QQ, WeChat, Feishu, Telegram, Discord, Slack, with more platforms to be added later |
 | Live Streaming Bots | Currently supports Bilibili, YouTube, Twitch, with more platforms to be added later |
 | Announcer Bot | Supports long text narration, multi-voice narration, digital human video narration, batch conversion of ultra-long texts to speech (with download capability), and parsing of common ebook formats like EPUB. Chapter-based conversion will be developed later. |
@@ -308,7 +310,6 @@ Please refer to the following document for the main functions:
 | Custom Tool Interfaces | Supports MCP, Skills, A2A, HTTP requests, and any LLM interface as tools for the main agent, enabling users to freely customize their agent's toolchain. |
 | Open External APIs | Developer-friendly with open APIs simulating OpenAI and MCP, as well as desktop pet APIs. |
 | Extension System | You can check out the available plugins in the [Extension List](https://super-agent-party.github.io/plugins.html). You can also view and install plugins directly in Party by navigating to 【Developer】 -> 【Extensions】. You can add your own developed extensions to the official extension list at [super-agent-party.github.io](https://github.com/super-agent-party/super-agent-party.github.io)! |
-| Storage Space | All files and data are stored in the user's local data folder. When deployed with NAS, it can also serve as a personal image or file host within the local network. |
 
 ## Disclaimer:
 This open-source project and its content (hereinafter referred to as the "project") are for reference only and do not imply any explicit or implicit warranties. The project contributors do not assume any responsibility for the completeness, accuracy, reliability, or applicability of the project. Any behavior that relies on the project content shall be at the user's own risk. In any case, the project contributors shall not be liable for any indirect, special, or incidental losses or damages arising from the use of the project content.
