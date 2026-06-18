@@ -10910,17 +10910,25 @@ async def upload_tha_model(
 ):
     from py.tha_engine import THAModelManager
 
-    file_extension = file.filename.split('.')[-1].lower()
-    if file_extension != 'zip':
+    filename = file.filename or ""
+    file_extension = filename.rsplit('.', 1)[-1].lower() if '.' in filename else ""
+
+    if file_extension not in ('zip', 'onnx'):
         return JSONResponse(
             status_code=400,
-            content={"success": False, "message": "只支持.zip格式的THA模型包"}
+            content={"success": False, "message": "只支持 .zip 或 .onnx 格式的 THA 模型"}
         )
 
     try:
-        zip_data = await file.read()
         manager = THAModelManager(DEFAULT_THA_DIR, THA_USER_MODELS_DIR)
-        success, msg, info = manager.install_zip(zip_data, display_name)
+
+        if file_extension == 'zip':
+            zip_data = await file.read()
+            success, msg, info = manager.install_zip(zip_data, display_name)
+        else:
+            # 单文件 .onnx 安装（baked 模型，无需 character.png）
+            onnx_data = await file.read()
+            success, msg, info = manager.install_file(onnx_data, display_name, "onnx")
 
         if success:
             return JSONResponse(content={

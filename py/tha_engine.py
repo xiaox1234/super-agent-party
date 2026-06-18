@@ -664,6 +664,38 @@ class THAModelManager:
             shutil.rmtree(target_dir)
             return False, f"安装失败: {str(e)}", {}
 
+    def install_file(self, data: bytes, display_name: str, extension: str) -> Tuple[bool, str, dict]:
+        """安装单个模型文件（.onnx baked 模型）, 保存到 user_upload_dir/{display_name}/"""
+        safe_name = display_name.strip().replace(" ", "_")
+        if not safe_name:
+            safe_name = f"model_{uuid.uuid4().hex[:8]}"
+
+        target_dir = os.path.join(self.user_upload_dir, safe_name)
+        abs_target = os.path.abspath(target_dir)
+        abs_user_dir = os.path.abspath(self.user_upload_dir)
+        if not abs_target.startswith(abs_user_dir + os.sep) and abs_target != abs_user_dir:
+            return False, "非法的模型目录路径", {}
+
+        if os.path.exists(target_dir):
+            import shutil
+            shutil.rmtree(target_dir)
+        os.makedirs(target_dir, exist_ok=True)
+
+        try:
+            dest = os.path.join(target_dir, f"model.{extension}")
+            with open(dest, 'wb') as f:
+                f.write(data)
+
+            return True, "安装成功", {
+                "id": safe_name,
+                "name": display_name,
+                "type": "user"
+            }
+        except Exception as e:
+            import shutil
+            shutil.rmtree(target_dir)
+            return False, f"安装失败: {str(e)}", {}
+
     def delete_model(self, model_id: str) -> bool:
         target_dir = os.path.join(self.user_upload_dir, model_id)
         abs_target = os.path.abspath(target_dir)
