@@ -355,10 +355,10 @@ chmod +x 一键更新(update).sh 一键启动(start).sh
 ### コミュニティに参加
 プロジェクトに関する質問や問題がありましたら、コミュニティへの参加を歓迎します。
 
-1. QQグループ：`931057213`
+1. QQグループ：`931057213`（1群已满） `902882342`（2群）
 
 <div style="display: flex; justify-content: center;">
-    <img src="doc/image/Q群.jpg" style="width: 48%;" />
+    <img src="doc/image/Q群2.jpg" style="width: 48%;" />
 </div>
 
 2. WeChatグループ：`we_glm`（アシスタントのWeChatを追加してグループに参加）
