@@ -384,10 +384,10 @@ We extend our gratitude to all contributors of the third-party libraries and com
 ### Join the Community
 If you have any questions or issues with the project, you are welcome to join our community.
 
-1. QQ Group: `931057213`
+1. QQ Group: `931057213`（1群已满） `902882342`（2群）
 
 <div style="display: flex; justify-content: center;">
-    <img src="doc/image/Q群.jpg" style="width: 48%;" />
+    <img src="doc/image/Q群2.jpg" style="width: 48%;" />
 </div>
 
 2. WeChat Group: `we_glm` (add the assistant's WeChat and join the group)

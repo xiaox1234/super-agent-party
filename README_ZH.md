@@ -389,10 +389,10 @@ docker-compose -f docker-compose-acr.yml up -d
 ### 加入社群
 如果项目存在问题或者您有其他的疑问，欢迎加入我们的社群。
 
-1. QQ群：`931057213`
+1. QQ群：`931057213`（1群已满） `902882342`（2群）
 
 <div style="display: flex; justify-content: center;">
-    <img src="doc/image/Q群.jpg" style="width: 48%;" />
+    <img src="doc/image/Q群2.jpg" style="width: 48%;" />
 </div>
 
 2. 微信群：`we_glm`（添加小助手微信后进群）
