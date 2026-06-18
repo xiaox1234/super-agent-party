@@ -8211,18 +8211,24 @@ async def tha_websocket_endpoint(websocket: WebSocket):
     tha_config = settings.get("THAConfig", {})
     selected_id = tha_config.get("selectedModelId", "Lyra")
 
-    # 1. 查找模型路径
+    # 1. 查找模型路径 (支持 model.mlpackage / model.onnx / model.onnx + character.png)
     model_path = None
     char_path = None
     default_dir = os.path.join(base_path, "tha_models")
     for entry in os.listdir(default_dir):
         entry_path = os.path.join(default_dir, entry)
         if os.path.isdir(entry_path) and entry == selected_id:
+            mlp = os.path.join(entry_path, "model.mlpackage")
             mp = os.path.join(entry_path, "model.onnx")
             cp = os.path.join(entry_path, "character.png")
-            if os.path.exists(mp) and os.path.exists(cp):
+
+            if os.path.isdir(mlp):
+                model_path = mlp
+                char_path = cp if os.path.exists(cp) else None
+                break
+            elif os.path.exists(mp):
                 model_path = mp
-                char_path = cp
+                char_path = cp if os.path.exists(cp) else None
                 break
 
     if not model_path:
@@ -8230,11 +8236,17 @@ async def tha_websocket_endpoint(websocket: WebSocket):
         for entry in os.listdir(user_dir):
             entry_path = os.path.join(user_dir, entry)
             if os.path.isdir(entry_path) and entry == selected_id:
+                mlp = os.path.join(entry_path, "model.mlpackage")
                 mp = os.path.join(entry_path, "model.onnx")
                 cp = os.path.join(entry_path, "character.png")
-                if os.path.exists(mp) and os.path.exists(cp):
+
+                if os.path.isdir(mlp):
+                    model_path = mlp
+                    char_path = cp if os.path.exists(cp) else None
+                    break
+                elif os.path.exists(mp):
                     model_path = mp
-                    char_path = cp
+                    char_path = cp if os.path.exists(cp) else None
                     break
 
     if not model_path:

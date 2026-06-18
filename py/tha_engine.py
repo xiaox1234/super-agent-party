@@ -296,13 +296,14 @@ def _get_mouth_pose() -> np.ndarray:
 # 4. THAEngine — ONNX 模型加载 & 渲染
 # ------------------------------------------------------------
 class THAEngine:
-    def __init__(self, model_path: str, character_path: str):
+    def __init__(self, model_path: str, character_path: Optional[str] = None):
         self.session: Optional[ort.InferenceSession] = None
         self.image_np: Optional[np.ndarray] = None
         self._loaded = False
+        self._baked = False  # 纹理是否内嵌
         self.model_path = model_path
         self.character_path = character_path
-        
+
         # 🌟 优化：预分配不变量，避免循环重复分配内存带来的 GC 压力
         self.green_bg = np.array([0.0, 255.0, 0.0], dtype=np.float32).reshape(3, 1, 1)
         # 🌟 缓存输出格式，跳过每帧 np.min() 检测
@@ -314,65 +315,65 @@ class THAEngine:
         """加载 ONNX 模型和角色纹理"""
         if self._loaded:
             return
-            
-        available_providers = ort.get_available_providers()
-        
-        provider_options = [
-            ("TensorrtExecutionProvider", {
-                "trt_fp16_enable": True,
-                "trt_engine_cache_enable": True,
-                "device_id": 0,
-            }),
-            ("CUDAExecutionProvider", {
-                "arena_extend_strategy": "kSameAsRequested",
-                "cudnn_conv_algo_search": "DEFAULT",
-                "do_copy_in_default_stream": True,
-                "gpu_mem_limit": 2 * 1024 * 1024 * 1024,
-            }),
-            ("ROCMExecutionProvider", {
-                "arena_extend_strategy": "kSameAsRequested",
-                "gpu_mem_limit": 2 * 1024 * 1024 * 1024,
-            }),
-            ("DmlExecutionProvider", {}),
-            ("CoreMLExecutionProvider", {}),
-            ("CPUExecutionProvider", {}),
-        ]
-        
-        providers = []
-        for p_name, p_opts in provider_options:
-            if p_name in available_providers:
-                providers.append((p_name, p_opts) if p_opts else p_name)
-        
-        if not providers:
-            providers = ["CPUExecutionProvider"]
-        
+
+        # ── 检测模型输入格式 ──
         sess_opts = ort.SessionOptions()
         sess_opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
         sess_opts.enable_mem_pattern = True
         sess_opts.enable_cpu_mem_arena = True
-        
+
+        # 先加载 ONNX 模型读取输入名
+        available_providers = ort.get_available_providers()
+
+        provider_options = [
+            ("TensorrtExecutionProvider", {"trt_fp16_enable": True, "trt_engine_cache_enable": True, "device_id": 0}),
+            ("CUDAExecutionProvider", {"arena_extend_strategy": "kSameAsRequested", "cudnn_conv_algo_search": "DEFAULT", "do_copy_in_default_stream": True, "gpu_mem_limit": 2 * 1024 * 1024 * 1024}),
+            ("ROCMExecutionProvider", {"arena_extend_strategy": "kSameAsRequested", "gpu_mem_limit": 2 * 1024 * 1024 * 1024}),
+            ("DmlExecutionProvider", {}),
+            ("CoreMLExecutionProvider", {}),
+            ("CPUExecutionProvider", {}),
+        ]
+
+        providers = []
+        for p_name, p_opts in provider_options:
+            if p_name in available_providers:
+                providers.append((p_name, p_opts) if p_opts else p_name)
+
+        if not providers:
+            providers = ["CPUExecutionProvider"]
+
         try:
             self.session = ort.InferenceSession(self.model_path, sess_opts, providers=providers)
         except Exception as e:
             logger.warning(f"[THA] 硬件加速加载失败，尝试强制回退到 CPU... 错误信息: {e}")
             self.session = ort.InferenceSession(self.model_path, sess_opts, providers=["CPUExecutionProvider"])
-            
+
         active_provider = self.session.get_providers()[0]
-        
+
+        # ── 检测是否 baked（单输入 pose）──
+        input_names = [i.name for i in self.session.get_inputs()]
+        self._baked = "image" not in input_names
+
         print(f"\n🚀 [THA] ===============================================")
         print(f"🚀 [THA] 检测到前端加载请求，2D 引擎成功初始化!")
         print(f"🚀 [THA] 模型文件: {os.path.basename(self.model_path)}")
+        print(f"🚀 [THA] 模型格式: {'baked (单 pose 输入)' if self._baked else 'standard (image+pose)'}")
         print(f"🚀 [THA] 激活的硬件加速后端: \033[1;32m{active_provider}\033[0m")
         print(f"🚀 [THA] ===============================================\n")
-        
-        logger.info(f"[THA] Active Provider: {active_provider}")
-        logger.info(f"[THA] Model: {self.model_path}")
 
-        img = np.array(Image.open(self.character_path).convert("RGBA"), dtype=np.float32) / 255.0
-        img[:, :, :3] = _srgb_to_linear(img[:, :, :3])
-        img[:, :, :3] *= img[:, :, 3:4]
-        img = img * 2.0 - 1.0
-        self.image_np = np.expand_dims(img.transpose(2, 0, 1), 0).astype(np.float32)
+        logger.info(f"[THA] Active Provider: {active_provider}")
+        logger.info(f"[THA] Model: {self.model_path} (baked={self._baked})")
+
+        # ── 加载纹理 (baked 模型不需要) ──
+        if not self._baked:
+            if not self.character_path or not os.path.exists(self.character_path):
+                raise FileNotFoundError(f"Character texture not found: {self.character_path}")
+            img = np.array(Image.open(self.character_path).convert("RGBA"), dtype=np.float32) / 255.0
+            img[:, :, :3] = _srgb_to_linear(img[:, :, :3])
+            img[:, :, :3] *= img[:, :, 3:4]
+            img = img * 2.0 - 1.0
+            self.image_np = np.expand_dims(img.transpose(2, 0, 1), 0).astype(np.float32)
+
         self._loaded = True
 
     def render(self, pose: np.ndarray) -> bytes:
@@ -381,7 +382,12 @@ class THAEngine:
             self.load()
 
         p = pose.reshape(1, 45).astype(np.float32)
-        out = self.session.run(None, {"image": self.image_np, "pose": p})[0]
+
+        if self._baked:
+            out = self.session.run(None, {"pose": p})[0]
+        else:
+            out = self.session.run(None, {"image": self.image_np, "pose": p})[0]
+
         img_data = out[0]  # (C, 512, 512)  CHW
 
         C = img_data.shape[0]
@@ -439,6 +445,89 @@ class THAEngine:
 
 
 # ------------------------------------------------------------
+# 4b. CoreMLTHAEngine — Apple Silicon CoreML 渲染
+# ------------------------------------------------------------
+class CoreMLTHAEngine:
+    """Apple Silicon CoreML .mlpackage 渲染引擎。纹理已内嵌，单 pose 输入。"""
+
+    def __init__(self, model_path: str, character_path: Optional[str] = None):
+        self.model = None
+        self._loaded = False
+        self.model_path = model_path
+        self.character_path = character_path
+        self._out_key = None
+
+        self.green_bg = np.array([0.0, 255.0, 0.0], dtype=np.float32).reshape(3, 1, 1)
+
+    def load(self):
+        if self._loaded:
+            return
+
+        try:
+            from coremltools.models import MLModel
+        except ImportError:
+            raise RuntimeError("coremltools not installed. Run: pip install coremltools")
+
+        self.model = MLModel(self.model_path)
+
+        # 检测输出 key
+        self._out_key = [k for k in self.model.get_spec().description.output if k.name != "pose"]
+        if self._out_key:
+            self._out_key = self._out_key[0].name
+        else:
+            self._out_key = None
+
+        print(f"\n🍎 [THA] ===============================================")
+        print(f"🍎 [THA] Apple Silicon CoreML 引擎初始化!")
+        print(f"🍎 [THA] 模型: {os.path.basename(self.model_path)}")
+        print(f"🍎 [THA] 格式: baked .mlpackage (单 pose 输入, Neural Engine)")
+        print(f"🍎 [THA] ===============================================\n")
+
+        self._loaded = True
+
+    def render(self, pose: np.ndarray) -> bytes:
+        if not self._loaded:
+            self.load()
+
+        p = pose.reshape(1, 45).astype(np.float32)
+        result = self.model.predict({"pose": p})
+
+        if self._out_key:
+            blended = result[self._out_key]
+        else:
+            blended = [v for k, v in result.items() if k != "pose"][0]
+
+        # blended: (1, 4, 512, 512) float32 [-1, 1] 或 (1, 3, 512, 512) uint8
+        img_data = blended[0]
+        C = img_data.shape[0]
+        _clip = np.clip
+
+        if C == 4:
+            # RGBA float32 [-1,1] → 绿幕合成
+            rgb = img_data[:3, :, :]
+            alpha = img_data[3, :, :]
+            rgb = (rgb + 1.0) * 127.5
+            alpha = (alpha + 1.0) * 0.5
+            alpha = alpha[np.newaxis, :, :]
+            result = rgb * alpha + self.green_bg * (1.0 - alpha)
+            result = _clip(result, 0, 255).astype(np.uint8)
+        elif C == 3:
+            if img_data.dtype == np.uint8:
+                result = img_data
+            else:
+                result = _clip((img_data + 1.0) * 127.5, 0, 255).astype(np.uint8)
+        else:
+            raise RuntimeError(f"Unsupported channel count: {C}")
+
+        rgb_out = np.ascontiguousarray(result.transpose(1, 2, 0))
+        return simplejpeg.encode_jpeg(rgb_out, quality=50, colorspace='RGB', colorsubsampling='422')
+
+    @property
+    def loaded(self) -> bool:
+        return self._loaded
+
+
+# ------------------------------------------------------------
 # 5. THAModelManager — 模型文件管理
 # ------------------------------------------------------------
 class THAModelManager:
@@ -460,17 +549,40 @@ class THAModelManager:
 
         for entry in os.listdir(directory):
             entry_path = os.path.join(directory, entry)
-            if os.path.isdir(entry_path):
-                onnx_path = os.path.join(entry_path, "model.onnx")
-                char_path = os.path.join(entry_path, "character.png")
-                if os.path.exists(onnx_path) and os.path.exists(char_path):
-                    models.append({
-                        "id": entry,
-                        "name": entry,
-                        "modelPath": os.path.join(entry_path, "model.onnx"),
-                        "charPath": os.path.join(entry_path, "character.png"),
-                        "type": model_type
-                    })
+            if not os.path.isdir(entry_path):
+                continue
+
+            # 检测模型文件 (优先级: .mlpackage > baked .onnx > old .onnx + .png)
+            mlp_path = os.path.join(entry_path, "model.mlpackage")
+            onnx_path = os.path.join(entry_path, "model.onnx")
+            char_path = os.path.join(entry_path, "character.png")
+
+            model_info = None
+            if os.path.isdir(mlp_path):
+                # CoreML .mlpackage
+                model_info = {
+                    "modelPath": mlp_path,
+                    "charPath": char_path if os.path.exists(char_path) else None,
+                    "format": "coreml",
+                }
+            elif os.path.exists(onnx_path):
+                # ONNX — 可能 baked 也可能需要 character.png
+                model_info = {
+                    "modelPath": onnx_path,
+                    "charPath": char_path if os.path.exists(char_path) else None,
+                    "format": "onnx",
+                }
+
+            if model_info:
+                models.append({
+                    "id": entry,
+                    "name": entry,
+                    "modelPath": model_info["modelPath"],
+                    "charPath": model_info["charPath"],
+                    "format": model_info["format"],
+                    "type": model_type,
+                })
+
         models.sort(key=lambda x: x["name"])
         return models
 
@@ -486,7 +598,7 @@ class THAModelManager:
         abs_user_dir = os.path.abspath(self.user_upload_dir)
         if not abs_target.startswith(abs_user_dir + os.sep) and abs_target != abs_user_dir:
             return False, "非法的模型目录路径", {}
-        
+
         if os.path.exists(target_dir):
             import shutil
             shutil.rmtree(target_dir)
@@ -495,19 +607,36 @@ class THAModelManager:
         try:
             with zipfile.ZipFile(io.BytesIO(zip_data), 'r') as zf:
                 names = zf.namelist()
-                onnx_found = False
+                model_found = False
                 png_found = False
+
                 for name in names:
                     basename = os.path.basename(name)
                     if not basename:
                         continue
-                    if basename.lower().endswith('.onnx'):
+
+                    # .mlpackage 目录
+                    if '.mlpackage' in name.lower():
+                        zf.extract(name, target_dir)
+                        # 重命名最外层的 .mlpackage 为 model.mlpackage
+                        parts = name.strip('/').split('/')
+                        if len(parts) >= 1:
+                            orig_mlp = os.path.join(target_dir, parts[0])
+                            if parts[0] != "model.mlpackage" and os.path.isdir(orig_mlp):
+                                dest = os.path.join(target_dir, "model.mlpackage")
+                                if os.path.exists(dest):
+                                    shutil.rmtree(dest)
+                                os.rename(orig_mlp, dest)
+                        model_found = True
+
+                    elif basename.lower().endswith('.onnx'):
                         zf.extract(name, target_dir)
                         actual_onnx = os.path.join(target_dir, name)
                         if os.path.basename(actual_onnx) != "model.onnx":
                             dest = os.path.join(target_dir, "model.onnx")
                             os.rename(actual_onnx, dest)
-                        onnx_found = True
+                        model_found = True
+
                     elif basename.lower().endswith('.png'):
                         zf.extract(name, target_dir)
                         actual_png = os.path.join(target_dir, name)
@@ -516,10 +645,10 @@ class THAModelManager:
                             os.rename(actual_png, dest)
                         png_found = True
 
-                if not onnx_found or not png_found:
+                if not model_found:
                     import shutil
                     shutil.rmtree(target_dir)
-                    return False, "ZIP包中缺少 model.onnx 或 character.png", {}
+                    return False, "ZIP包中缺少 model.onnx 或 model.mlpackage", {}
 
             return True, "安装成功", {
                 "id": safe_name,
@@ -539,11 +668,11 @@ class THAModelManager:
         target_dir = os.path.join(self.user_upload_dir, model_id)
         abs_target = os.path.abspath(target_dir)
         abs_user_dir = os.path.abspath(self.user_upload_dir)
-        # 安全检查: 确保目标目录在预期的用户上传目录内，且不是根目录
         if os.path.exists(target_dir) and os.path.isdir(target_dir) and (abs_target.startswith(abs_user_dir + os.sep) or abs_target == abs_user_dir + os.sep + model_id):
-            # 额外检查: 确保目录包含 THA 模型文件(model.onnx)，防止误删非THA目录
+            # 检查是否包含 THA 模型文件 (model.onnx 或 model.mlpackage)
             onnx_path = os.path.join(target_dir, "model.onnx")
-            if not os.path.exists(onnx_path):
+            mlp_path = os.path.join(target_dir, "model.mlpackage")
+            if not os.path.exists(onnx_path) and not os.path.isdir(mlp_path):
                 return False
             import shutil
             shutil.rmtree(target_dir)
@@ -554,20 +683,28 @@ class THAModelManager:
 # ------------------------------------------------------------
 # 6. 全局引擎缓存
 # ------------------------------------------------------------
-_engine_cache: Dict[str, THAEngine] = {}
+_engine_cache: Dict[str, object] = {}
 
 
-def get_engine(model_path: str, character_path: str) -> THAEngine:
-    cache_key = f"{model_path}::{character_path}"
+def get_engine(model_path: str, character_path: Optional[str] = None):
+    """工厂函数：自动检测模型格式，返回对应引擎实例。
+
+    支持格式：
+      - model.onnx (baked 或 2-input) → THAEngine
+      - model.mlpackage (CoreML) → CoreMLTHAEngine
+    """
+    cache_key = f"{model_path}::{character_path or ''}"
     if cache_key not in _engine_cache:
-        # 只建立外壳实例，绝对不在主线程里调用耗时的 engine.load()
-        engine = THAEngine(model_path, character_path)
+        if model_path.endswith('.mlpackage') or os.path.isdir(model_path):
+            engine = CoreMLTHAEngine(model_path, character_path)
+        else:
+            engine = THAEngine(model_path, character_path)
         _engine_cache[cache_key] = engine
     return _engine_cache[cache_key]
 
 
-def delete_engine_cache_item(model_path: str, character_path: str):
-    cache_key = f"{model_path}::{character_path}"
+def delete_engine_cache_item(model_path: str, character_path: Optional[str] = None):
+    cache_key = f"{model_path}::{character_path or ''}"
     if cache_key in _engine_cache:
         del _engine_cache[cache_key]
 
