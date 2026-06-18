@@ -9,6 +9,8 @@ import argparse
 import socket
 import errno
 
+from PIL import Image
+
 _is_steam_build = os.environ.get("IS_STEAM_BUILD", "0") == "1"
 from py.cli_tool import read_file_tool_local
 from py.task_tools import query_task_progress

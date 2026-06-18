@@ -313,7 +313,6 @@ docker-compose -f docker-compose-acr.yml up -d
 | 自定义工具接口 | 已支持MCP、Skills、A2A、HTTP请求、任意LLM接口作为主智能体的工具使用，让用户以完全自由的方式定制自己的智能体工具链 |
 | 对外接口开放 | 开发者友好，对外开放模拟openAI和MCP的API接口，以及桌宠API接口 |
 | 扩展系统 | 你可以在这里 [扩展列表](https://super-agent-party.github.io/plugins.html) 查看有哪些插件可用，你也可以直接在party中直接在【开发者】->【扩展】中查看和安装插件。你可以在[super-agent-party.github.io](https://github.com/super-agent-party/super-agent-party.github.io) 将你自己开发的扩展添加到官方扩展列表中！ |
-| 存储空间 | 所有的文件资料均存放在用户本地的数据文件夹中，如果使用NAS部署，还可以作为内网的个人图床、文件床使用 |
 
 ## 免责声明：
 本开源项目及其内容（以下简称“项目”）仅供参考之用，并不意味着任何明示或暗示的保证。项目贡献者不对项目的完整性、准确性、可靠性或适用性承担任何责任。任何依赖项目内容的行为均需自行承担风险。在任何情况下，项目贡献者均不对因使用项目内容而产生的任何间接、特殊或附带的损失或损害承担责任。
