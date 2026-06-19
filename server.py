@@ -4420,8 +4420,9 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                     yield f"data: {json.dumps(final_chunk)}\n\n"
                     full_content += final_chunk["choices"][0]["delta"].get("content", "")
                 if settings.get("systemSettings", {}).get("contentSafety", False) and full_content:
-                    is_safe, matched = await check_content_safety(full_content)
+                    is_safe, matched = await check_content_safety(full_content, min_cjk_chars=3)
                     if not is_safe:
+                        print(f"[content_safety] output blocked words: {matched}")
                         correction = {"choices": [{"delta": {"content": "[该回复已被内容安全策略自动替换]", "_safety_filtered": True}}]}
                         yield f"data: {json.dumps(correction)}\n\n"
                         full_content = "[该回复已被内容安全策略自动替换]"
@@ -5237,8 +5238,9 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                         yield f"data: {json.dumps(final_chunk)}\n\n"
                         full_content += final_chunk["choices"][0]["delta"].get("content", "")
                     if settings.get("systemSettings", {}).get("contentSafety", False) and full_content:
-                        is_safe, matched = await check_content_safety(full_content)
+                        is_safe, matched = await check_content_safety(full_content, min_cjk_chars=3)
                         if not is_safe:
+                            print(f"[content_safety] output blocked words: {matched}")
                             correction = {"choices": [{"delta": {"content": "[该回复已被内容安全策略自动替换]", "_safety_filtered": True}}]}
                             yield f"data: {json.dumps(correction)}\n\n"
                             full_content = "[该回复已被内容安全策略自动替换]"
@@ -6730,6 +6732,7 @@ async def chat_endpoint(request: ChatRequest, fastapi_request: Request):
                 all_text += " " + " ".join(item.get("text", "") for item in content if isinstance(item, dict) and item.get("type") == "text")
         is_safe, matched = await check_content_safety(all_text)
         if not is_safe:
+            print(f"[content_safety] input blocked words: {matched}")
             return JSONResponse(
                 status_code=403,
                 content={"error": {"message": "您的输入包含敏感内容，已被安全策略拦截。", "type": "content_safety", "code": 403}}
@@ -11465,6 +11468,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     if sys_prompt:
                         is_safe, matched = await check_content_safety(sys_prompt)
                         if not is_safe:
+                            print(f"[content_safety] ws save_settings blocked words: {matched}")
                             await ws_manager.send_json({"type": "error", "message": "系统提示词包含敏感内容，设置未保存。"}, websocket)
                             break
                 await save_settings(settings_dict)
@@ -11489,14 +11493,16 @@ async def websocket_endpoint(websocket: WebSocket):
                             if msg.get("role") == "assistant":
                                 content = msg.get("content", "")
                                 if isinstance(content, str):
-                                    is_safe, matched = await check_content_safety(content)
+                                    is_safe, matched = await check_content_safety(content, min_cjk_chars=3)
                                     if not is_safe:
+                                        print(f"[content_safety] ws save_conversations blocked words: {matched}")
                                         msg["content"] = "[该回复已被内容安全策略自动替换]"
                                         msg["_safety_filtered"] = True
                                 elif isinstance(content, list):
                                     text = " ".join(item.get("text", "") for item in content if isinstance(item, dict) and item.get("type") == "text")
-                                    is_safe, matched = await check_content_safety(text)
+                                    is_safe, matched = await check_content_safety(text, min_cjk_chars=3)
                                     if not is_safe:
+                                        print(f"[content_safety] ws save_conversations blocked words: {matched}")
                                         msg["content"] = "[该回复已被内容安全策略自动替换]"
                                         msg["_safety_filtered"] = True
                 await save_covs(cov_data)
@@ -11553,6 +11559,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 if cur_settings.get("systemSettings", {}).get("contentSafety", False):
                     is_safe, matched = await check_content_safety(extension_system_prompt)
                     if not is_safe:
+                        print(f"[content_safety] ws set_system_prompt blocked words: {matched}")
                         await ws_manager.send_json({"type": "error", "message": "系统提示词包含敏感内容，已被安全策略拦截。"}, websocket)
                         break
                 await ws_manager.broadcast({
