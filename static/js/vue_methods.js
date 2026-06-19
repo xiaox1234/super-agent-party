@@ -2549,9 +2549,12 @@ formatMessage(content, index) {
             this.isReadInterruption = true;
         }
 
-        if (this.currentAudio){
-            this.currentAudio.pause();
-            this.currentAudio = null;
+        if (this.messages.length > 0) {
+            const lastMsg = this.messages[this.messages.length - 1];
+            if (lastMsg._currentAudio){
+                lastMsg._currentAudio.pause();
+                lastMsg._currentAudio = null;
+            }
         }
         this.stopAllAudioPlayback();
         this.TTSrunning = false;
@@ -9190,15 +9193,13 @@ handleCreateSlackSeparator(val) {
           if (probabilities["isSpeech"] > min_probabilities) {
             // 打断逻辑
             if (this.ttsSettings.enabledInterruption) {
-              if (this.currentAudio) {
-                this.currentAudio.pause();
-                this.currentAudio = null;
-              }
+              this.stopAllAudioPlayback();
               this.stopGenerate();
               this.sendTTSStatusToVRM('stopSpeaking', {});
             }
 
-            if (!this.currentAudio || this.currentAudio.paused) {
+            const anyPlaying = this.messages.some(m => m._currentAudio && !m._currentAudio.paused);
+            if (!anyPlaying) {
               if (this.asrSettings.engine === 'webSpeech') {
                 this.handleWebSpeechFrameProcessed();
               } else {
@@ -9785,13 +9786,9 @@ processMarkdownStreamForTTS(message, deltaText, isFinal = false) {
             continue;
         }
 
-        // 2. 拦截行内代码 (`)
+        // 2. 拦截行内代码 (`) — 保留内容，仅移除标记符号
         if (textToProcess[i] === '`') {
-            state.inInlineCode = !state.inInlineCode;
-            i++;
-            continue;
-        }
-        if (state.inInlineCode) {
+            // 不跳过内容：对于 TTS 来说，`code` 里的文字也应该朗读
             i++;
             continue;
         }
@@ -9976,7 +9973,8 @@ processMarkdownStreamForTTS(message, deltaText, isFinal = false) {
     // TTS处理进程 - 使用流式响应
     // 修改 TTS 处理开始时的通知
     async startTTSProcess(message) {
-      if (!this.ttsSettings.enabled) return;
+      if (!this.ttsSettings.enabled || message.audioAborted) return;
+      message._ttsRunning = true;
       this.TTSrunning = true;
       this.cur_audioDatas = [];
       
@@ -9992,7 +9990,7 @@ processMarkdownStreamForTTS(message, deltaText, isFinal = false) {
       
       let max_concurrency = 1;
       let nextIndex = 0;
-      while (this.TTSrunning) {
+      while (message._ttsRunning && !message.audioAborted) {
         if (nextIndex == 0){
           let remainingText = lastMessage.ttsChunks?.[0] || '';
           let newttsList = [];
@@ -10029,7 +10027,7 @@ processMarkdownStreamForTTS(message, deltaText, isFinal = false) {
         max_concurrency = this.ttsSettings.maxConcurrency || 1; 
         while (lastMessage.ttsQueue.size < max_concurrency && 
               nextIndex < lastMessage.ttsChunks.length) {
-          if (!this.TTSrunning) break;
+          if (!message._ttsRunning || message.audioAborted) break;
           const index = nextIndex++;
           lastMessage.ttsQueue.add(index);
           
@@ -10051,6 +10049,7 @@ processMarkdownStreamForTTS(message, deltaText, isFinal = false) {
 
         await new Promise(resolve => setTimeout(resolve, 10));
       }
+      message._ttsRunning = false;
       // this.messages[this.messages.length - 1].currentChunk = 0;
       console.log('TTS queue processing completed');
     },
@@ -10061,6 +10060,7 @@ processMarkdownStreamForTTS(message, deltaText, isFinal = false) {
       this.elapsedTime = Date.now() - this.startTime;
     },
     async processTTSChunk(message, index) {
+        if (message.audioAborted) return;
         let voice = message.chunks_voice[index];
         const chunk = message.ttsChunks[index];
         
@@ -10312,6 +10312,7 @@ processMarkdownStreamForTTS(message, deltaText, isFinal = false) {
                     if (isLatestMessage) {
                         this.TTSrunning = false; 
                     }
+                    lastMessage._ttsRunning = false;
                     try { fetch('/api/overlay/danmaku/clear', { method: 'POST' }).catch(()=>{}); } catch(e){}
                     if (resolve) resolve();
                     return;
@@ -10324,6 +10325,7 @@ processMarkdownStreamForTTS(message, deltaText, isFinal = false) {
                         if (isLatestMessage) {
                             this.TTSrunning = false; 
                         }
+                        lastMessage._ttsRunning = false;
                         try { fetch('/api/overlay/danmaku/clear', { method: 'POST' }).catch(()=>{}); } catch(e){}
                         if (resolve) resolve();
                         return;
@@ -10380,13 +10382,13 @@ processMarkdownStreamForTTS(message, deltaText, isFinal = false) {
                     this.sendBinaryToVRM(metadata, audioChunk.buffer);
                 }
 
-                this.currentAudio = audioChunk._audio || new Audio(audioChunk.url);
+                lastMessage._currentAudio = audioChunk._audio || new Audio(audioChunk.url);
                 
                 if (isVrmSilent) {
-                    this.currentAudio.volume = 1.0; // 弹幕声音从浏览器出
+                    lastMessage._currentAudio.volume = 1.0; // 弹幕声音从浏览器出
                     console.log("正在播放弹幕:", audioChunk.text);
                 } else {
-                    this.currentAudio.volume = this.vrmOnline ? 0.0000001 : 1.0; // AI声音从VRM出
+                    lastMessage._currentAudio.volume = this.vrmOnline ? 0.0000001 : 1.0; // AI声音从VRM出
                 }
                 
                 // 发送指令通知 VRM 更新状态（UI显示、表情等）
@@ -10402,9 +10404,9 @@ processMarkdownStreamForTTS(message, deltaText, isFinal = false) {
                 
                 // 等待当前这段音频播完
                 await new Promise((r) => {
-                    this.currentAudio.onended = r;
-                    this.currentAudio.onerror = r; 
-                    this.currentAudio.play().catch(e => {
+                    lastMessage._currentAudio.onended = r;
+                    lastMessage._currentAudio.onerror = r; 
+                    lastMessage._currentAudio.play().catch(e => {
                         console.error("播放失败", e);
                         r(); 
                     });
@@ -10515,22 +10517,33 @@ processMarkdownStreamForTTS(message, deltaText, isFinal = false) {
 
     // 停止所有正在播放的音频
     stopAllAudioPlayback() {
-      // --- 核心修复 1：给所有消息打上“终止循环”的标记 ---
+      // --- 核心修复 1：给所有消息打上"终止循环"的标记 ---
       this.messages.forEach(message => {
         message.audioAborted = true; 
         message.isPlaying = false;
+        // 快速淡出并停止每一条消息正在播放的音频
+        if (message._currentAudio && !message._currentAudio.paused) {
+          const audio = message._currentAudio;
+          const fadeSteps = 5;
+          const fadeInterval = 30;
+          let step = 0;
+          const origVolume = audio.volume;
+          const fadeOut = setInterval(() => {
+            step++;
+            audio.volume = Math.max(0, origVolume * (1 - step / fadeSteps));
+            if (step >= fadeSteps) {
+              clearInterval(fadeOut);
+              audio.pause();
+              audio.volume = origVolume;
+              if (typeof audio.onended === 'function') {
+                audio.onended(); 
+              }
+            }
+          }, fadeInterval);
+        }
+        message._currentAudio = null;
       });
 
-      // 1. 停止 HTML5 Audio (普通 TTS)
-      if (this.currentAudio) {
-        this.currentAudio.pause();
-        // --- 核心修复 2：手动触发 onended，让 checkAudioPlayback 中的 await Promise 立即放行 ---
-        if (typeof this.currentAudio.onended === 'function') {
-          this.currentAudio.onended(); 
-        }
-        this.currentAudio = null;
-      }
-      
       // 2. 停止阅读音频
       if (this.currentReadAudio) {
         this.currentReadAudio.pause();
@@ -10584,7 +10597,7 @@ processMarkdownStreamForTTS(message, deltaText, isFinal = false) {
         }
 
         const audio = new Audio(audioChunk.url);
-        this.currentAudio = audio; // 保存当前音频对象
+        message._currentAudio = audio;
 
         // 设置音量：VRM在线时静音，让VRM播放；不在线时正常播放
         audio.volume = this.vrmOnline ? 0.0000001 : 1;
