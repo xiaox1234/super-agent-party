@@ -518,6 +518,7 @@ let typewriterTimer = null;
 let isAudioStreaming = false;
 let isOmniMode = false;           
 let subtitleTimeout = null;
+let processedChunks = new Set(); 
 
 function renderSubtitleUI(text) {
     if (!subtitleEl) return;
@@ -774,6 +775,13 @@ function handleTTSBinary(buffer) {
   
   try {
     const meta = JSON.parse(new TextDecoder().decode(jsonBytes));
+    
+    // 🌟 添加去重逻辑：拦截前端因为状态同步而产生的重复音频分片
+    if (meta.chunkIndex !== undefined) {
+        if (processedChunks.has(meta.chunkIndex)) return;
+        processedChunks.add(meta.chunkIndex);
+    }
+    
     if (audioBytes.length > 0) {
        audioQueue.push({ audioBytes, meta });
        if (!isPlayingAudio) {
@@ -782,6 +790,7 @@ function handleTTSBinary(buffer) {
     }
   } catch (err) {}
 }
+
 
 function connectTTS() {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -807,6 +816,8 @@ function handleTTSMessage(msg) {
       displayStartIndex = 0;
       stopTypewriterLoop();
       haltCurrentAudio();
+      
+      processedChunks.clear(); // 🌟 清理已播放的音频块记录，防止历史记录重放失败
       
       if (type === 'stopSpeaking') finalizeSpeech(true);
       else clearSubtitle();
