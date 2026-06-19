@@ -26,7 +26,8 @@
       "bgHistoryList": [],
       "contentSafety": false,
       "disclaimerAccepted": false,
-      "showDisclaimer": true
+      "showDisclaimer": true,
+      "goal_iterations": 30
     },
     "mainAgent":"super-model",
     "mcpServers": {},

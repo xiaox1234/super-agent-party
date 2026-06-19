@@ -61,18 +61,19 @@ from py.acpx_tools import acp_agent_tool, acpx_agent
 # Extended CLI tool imports for dispatch_tool
 from py.cli_tool import (
     docker_sandbox, list_files_tool, read_file_tool, read_file_range_tool,
-    tail_file_tool, search_files_tool, edit_file_tool, edit_file_patch_tool,
-    glob_files_tool, todo_write_tool, list_processes_tool, get_process_logs_tool,
-    kill_process_tool, docker_manage_ports_tool, read_skill_tool,
-    shell_tool_local, list_files_tool_local, read_file_range_tool_local,
-    tail_file_tool_local, search_files_tool_local, edit_file_tool_local,
-    edit_file_patch_tool_local, glob_files_tool_local, todo_write_tool_local,
+    tail_file_tool, search_files_tool, edit_file_tool,
+    edit_file_string_tool, glob_files_tool, todo_write_tool, list_processes_tool,
+    get_process_logs_tool, kill_process_tool, docker_manage_ports_tool,
+    read_skill_tool, shell_tool_local, list_files_tool_local,
+    read_file_tool_local, read_file_range_tool_local, tail_file_tool_local,
+    search_files_tool_local, edit_file_tool_local,
+    edit_file_string_tool_local, glob_files_tool_local, todo_write_tool_local,
     local_net_tool, send_process_input_tool, read_skill_tool_local,
     get_tools_for_mode, get_local_tools_for_mode,
 )
 from py.task_tools import (
-    create_subtask_tool, query_tasks_tool, cancel_subtask_tool, finish_task_tool,
-    create_subtask, cancel_subtask, finish_task,
+    create_subtask_tool, query_tasks_tool, cancel_subtask_tool, finish_task_tool, finish_main_task_tool,
+    create_subtask, cancel_subtask, finish_task, finish_main_task,
 )
 from py.load_files import get_files_content, file_tool, image_tool
 
@@ -1182,7 +1183,7 @@ async def dispatch_tool(tool_name: str, tool_params: dict, settings: dict,is_sub
         "tail_file_tool": tail_file_tool,             # <--- 映射新工具
         "search_files_tool": search_files_tool,
         "edit_file_tool": edit_file_tool,
-        "edit_file_patch_tool": edit_file_patch_tool,
+        "edit_file_string_tool": edit_file_string_tool,
         "glob_files_tool": glob_files_tool,
         "todo_write_tool": todo_write_tool,
         "list_processes_tool": list_processes_tool,
@@ -1199,7 +1200,7 @@ async def dispatch_tool(tool_name: str, tool_params: dict, settings: dict,is_sub
         "tail_file_tool_local": tail_file_tool_local,             # <--- 映射新工具
         "search_files_tool_local": search_files_tool_local,     # 本地文件搜索
         "edit_file_tool_local": edit_file_tool_local,           # 本地文件写入
-        "edit_file_patch_tool_local": edit_file_patch_tool_local,  # 本地精确替换
+        "edit_file_string_tool_local": edit_file_string_tool_local,  # 本地字符串替换
         "glob_files_tool_local": glob_files_tool_local,         # 本地 glob 查找
         "todo_write_tool_local": todo_write_tool_local,         # 本地任务管理
         "local_net_tool": local_net_tool,                       # 本地网络工具
@@ -1211,6 +1212,7 @@ async def dispatch_tool(tool_name: str, tool_params: dict, settings: dict,is_sub
         "query_task_progress": query_task_progress,
         "cancel_subtask": cancel_subtask,
         "finish_task":finish_task,
+        "finish_main_task":finish_main_task,
 
         # 鼠标键盘控制
         "mouse_move":mouse_move,
@@ -1243,10 +1245,10 @@ async def dispatch_tool(tool_name: str, tool_params: dict, settings: dict,is_sub
     SENSITIVE_TOOLS = [
         "docker_sandbox",
         "edit_file_tool",
-        "edit_file_patch_tool",          
+        "edit_file_string_tool",
         "shell_tool_local",
         "edit_file_tool_local",
-        "edit_file_patch_tool_local",
+        "edit_file_string_tool_local",
         "list_processes_tool",
         "get_process_logs_tool",
         "kill_process_tool",
@@ -1276,14 +1278,14 @@ async def dispatch_tool(tool_name: str, tool_params: dict, settings: dict,is_sub
         is_allowed = False
 
         # --- 规则 A: 全局 YOLO 模式 (Bypass Permissions) ---
-        if permission_mode == "yolo" or permission_mode == "cowork":
+        if permission_mode == "yolo" or permission_mode == "cowork" or permission_mode == "goal":
             is_allowed = True
             
         # --- 规则 B: 自动批准模式 (Accept Edits) ---
         # 允许文件编辑类工具（包括全量写入、精确替换、任务管理）
         # 但依然拦截终端命令（docker/bash）
         elif permission_mode == "auto-approve":
-            if tool_name in ["edit_file_tool", "edit_file_patch_tool", "todo_write_tool", "edit_file_tool_local", "edit_file_patch_tool_local", "todo_write_tool_local"]:
+            if tool_name in ["edit_file_tool", "edit_file_string_tool", "todo_write_tool", "edit_file_tool_local", "edit_file_string_tool_local", "todo_write_tool_local"]:
                 is_allowed = True
             # docker/bash 等危险命令在此模式下依然默认拦截，除非在项目白名单中
         
@@ -1378,7 +1380,7 @@ async def dispatch_tool(tool_name: str, tool_params: dict, settings: dict,is_sub
                 return str(result)
                 
     # ==================== 5. 任务中心工具特殊处理 ====================
-    if tool_name in ["create_subtask", "query_task_progress", "cancel_subtask","finish_task"]:
+    if tool_name in ["create_subtask", "query_task_progress", "cancel_subtask", "finish_task", "finish_main_task"]:
         cli_settings = settings.get("CLISettings", {})
         cwd = cli_settings.get("cc_path")
         
@@ -1420,6 +1422,11 @@ async def dispatch_tool(tool_name: str, tool_params: dict, settings: dict,is_sub
                 workspace_dir=cwd,
                 task_id=tool_params.get("task_id"),
                 result=tool_params.get("result"),
+            )
+            return result
+        elif tool_name == "finish_main_task":
+            result = await finish_main_task(
+                result=tool_params.get("result", ""),
             )
             return result
 
@@ -2025,9 +2032,9 @@ def get_system_context() -> str:
     
     # 检测 shell
     if system == "Windows":
-        shell = "CMD"
+        shell = "PowerShell"
         path_hint = "使用 Windows 路径格式（C:\\Users\\name\\file），命令使用 dir、copy、del 等"
-        command_hint = f"当前使用 {shell}，命令语法为 Windows 风格。避免使用 Unix 命令（ls/cat/rm），改用 dir/type/del"
+        command_hint = f"当前使用 {shell}，优先使用 PowerShell cmdlet（如 Get-ChildItem、Get-Content、Remove-Item），也兼容部分 CMD 命令。避免使用 Unix 命令（ls/cat/rm）"
     elif system == "Darwin":
         shell = os.path.basename(os.environ.get('SHELL', '/bin/zsh'))
         path_hint = "使用 Unix 路径格式（/Users/name/file），区分大小写"
@@ -2158,9 +2165,22 @@ async def tools_change_messages(request: ChatRequest, settings: dict):
     # 权限模式提示（固定）
     if cwd and Path(cwd).exists() and cli_settings.get("enabled", False):
         permission_message = ""
-        if permissionMode != "plan" and permissionMode != "cowork":
+        if permissionMode != "plan" and permissionMode != "cowork" and permissionMode != "goal":
             permission_message = "你当前处于执行模式，你可以自由地使用所有工具，但请注意不要滥用权限！如果有更安全的工具，请不要直接使用bash命令！"
             content_append(request.messages, 'system', permission_message)
+        elif permissionMode == "goal":
+            if not request.is_sub_agent:
+                permission_message += "你当前处于目标完成模式。你拥有最高权限，可以使用所有工具。你可以通过 create_subtask 工具将子任务分派给子智能体并行处理。当你确认用户的主任务已经全部达成时，必须调用 finish_main_task 工具并提供最终执行结果的详细总结来标记任务完成。在调用 finish_main_task 之前不要停止。\n\n"
+                content_append(request.messages, 'system', permission_message)
+                if request.is_app_bot and request.platform:
+                    task_platform_message = f"\n\n使用create_subtask工具时请将platforms参数设置为[{request.platform}]，从而将子任务的结果及时发给用户。\n\n"
+                    content_append(request.messages, 'system', task_platform_message)
+                else:
+                    task_platform_message = f"\n\n使用create_subtask工具时请将platforms参数设置为['chat']，从而将子任务的结果及时发给用户本地客户端。\n\n"
+                    content_append(request.messages, 'system', task_platform_message)
+            else:
+                permission_message = "你当前处于执行模式，你可以自由地使用所有工具，但请注意不要滥用权限！如果有更安全的工具，请不要直接使用bash命令！"
+                content_append(request.messages, 'system', permission_message)
         elif permissionMode == "cowork":
             if not request.is_sub_agent:
                 permission_message += "你当前处于协作模式，create_subtask工具可以帮你完成几乎任何任务（比如查资料、写代码、生成报告等），当你遇到难题时，可以尝试把它分解成一个个小任务，交给create_subtask工具去完成！当用户再次询问进度时，你可以用query_task_progress工具查询任务进度和获取详细结果\n\n"
@@ -3993,6 +4013,14 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                     tools.append(query_tasks_tool)
                     tools.append(cancel_subtask_tool)
                     if  settings['CLISettings']['mode_change']:
+                        tools.append(mode_change_tool)
+
+                if permission_mode == "goal" and settings['CLISettings']['enabled'] and not request.is_sub_agent:
+                    tools.append(create_subtask_tool)
+                    tools.append(query_tasks_tool)
+                    tools.append(cancel_subtask_tool)
+                    tools.append(finish_main_task_tool)
+                    if settings['CLISettings']['mode_change']:
                         tools.append(mode_change_tool)
 
                 if request.is_sub_agent:
@@ -6822,7 +6850,59 @@ async def chat_endpoint(request: ChatRequest, fastapi_request: Request):
         try:
             # 传入 active_client (0延迟切换) 和 request_settings
             if request.stream:
-                return await generate_stream_response(active_client, reasoner_client, request, request_settings, fastapi_base_url, enable_thinking, enable_deep_research, enable_web_search, async_tools_id)
+                cli_settings = request_settings.get("CLISettings", {})
+                engine = cli_settings.get("engine", "")
+                if engine == "local":
+                    env_settings = request_settings.get("localEnvSettings", {})
+                elif engine == "ds":
+                    env_settings = request_settings.get("dsSettings", {})
+                else:
+                    env_settings = request_settings.get("acpSettings", {})
+                permission_mode = env_settings.get("permissionMode", "default")
+                goal_mode_active = (permission_mode == "goal" and cli_settings.get("enabled", False) and not request.is_sub_agent)
+                max_goal_iterations = request_settings.get("systemSettings", {}).get("goal_iterations", 30)
+
+                if not goal_mode_active:
+                    return await generate_stream_response(active_client, reasoner_client, request, request_settings, fastapi_base_url, enable_thinking, enable_deep_research, enable_web_search, async_tools_id)
+
+                async def goal_wrapper(iteration_counter):
+                    while True:
+                        msg_count_before = len(request.messages)
+                        stream_resp = await generate_stream_response(active_client, reasoner_client, request, request_settings, fastapi_base_url, enable_thinking, enable_deep_research, enable_web_search, async_tools_id)
+                        async for chunk in stream_resp.body_iterator:
+                            if isinstance(chunk, bytes):
+                                chunk = chunk.decode('utf-8')
+                            if chunk.startswith("data: [DONE]"):
+                                continue
+                            yield chunk
+
+                        finish_called = False
+                        for msg in request.messages[msg_count_before:]:
+                            tcs = msg.get("tool_calls", []) if isinstance(msg, dict) else []
+                            for tc in (tcs or []):
+                                if isinstance(tc, dict) and tc.get("function", {}).get("name") == "finish_main_task":
+                                    finish_called = True
+                                    break
+                            if finish_called:
+                                break
+
+                        if finish_called:
+                            yield "data: [DONE]\n\n"
+                            return
+
+                        iteration_counter[0] += 1
+                        if iteration_counter[0] >= max_goal_iterations:
+                            max_chunk = {"choices": [{"delta": {"content": f"\n\n已达到最大目标迭代次数（{max_goal_iterations}次），任务自动结束。"}}]}
+                            yield f"data: {json.dumps(max_chunk)}\n\n"
+                            yield "data: [DONE]\n\n"
+                            return
+
+                        request.messages.append({
+                            "role": "user",
+                            "content": "请审视你的任务是否已经完成？如果已完成，请调用 finish_main_task 工具并提供最终产出结果来标记任务完成；如果尚未完成，请继续执行。"
+                        })
+
+                return StreamingResponse(goal_wrapper([0]), media_type="text/event-stream")
             return await generate_complete_response(active_client, reasoner_client, request, request_settings, fastapi_base_url, enable_thinking, enable_deep_research, enable_web_search)
         except asyncio.CancelledError:
             print("Client disconnected")

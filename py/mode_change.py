@@ -31,21 +31,21 @@ async def update_workspace_settings(
             changed = True
 
         # 2. 本地环境权限
-        if local_permission_mode in ["plan", "default", "auto-approve", "yolo", "cowork"]:
+        if local_permission_mode in ["plan", "default", "auto-approve", "yolo", "cowork", "goal"]:
             if "localEnvSettings" not in settings:
                 settings["localEnvSettings"] = {}
             settings["localEnvSettings"]["permissionMode"] = local_permission_mode
             changed = True
 
         # 3. Docker Sandbox 权限
-        if ds_permission_mode in ["plan", "default", "auto-approve", "yolo", "cowork"]:
+        if ds_permission_mode in ["plan", "default", "auto-approve", "yolo", "cowork", "goal"]:
             if "dsSettings" not in settings:
                 settings["dsSettings"] = {}
             settings["dsSettings"]["permissionMode"] = ds_permission_mode
             changed = True
 
         # 4. ★ ACP 协议权限
-        if acp_permission_mode in ["plan", "default", "auto-approve", "yolo", "cowork"]:
+        if acp_permission_mode in ["plan", "default", "auto-approve", "yolo", "cowork", "goal"]:
             if "acpSettings" not in settings:
                 settings["acpSettings"] = {}
             settings["acpSettings"]["permissionMode"] = acp_permission_mode
@@ -118,17 +118,17 @@ mode_change_tool = {
                 },
                 "local_permission_mode": {
                     "type": "string",
-                    "enum": ["plan", "default", "auto-approve", "yolo", "cowork"],
+                    "enum": ["plan", "default", "auto-approve", "yolo", "cowork", "goal"],
                     "description": "Permission mode for local environment"
                 },
                 "ds_permission_mode": {
                     "type": "string",
-                    "enum": ["plan", "default", "auto-approve", "yolo", "cowork"],
+                    "enum": ["plan", "default", "auto-approve", "yolo", "cowork", "goal"],
                     "description": "Permission mode for Docker Sandbox environment"
                 },
                 "acp_permission_mode": {
                     "type": "string",
-                    "enum": ["plan", "default", "auto-approve", "yolo", "cowork"],
+                    "enum": ["plan", "default", "auto-approve", "yolo", "cowork", "goal"],
                     "description": "Permission mode for ACP Protocol sub-agents"
                 }
             }

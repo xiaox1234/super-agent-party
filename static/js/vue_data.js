@@ -508,6 +508,7 @@ let vue_data = {
       contentSafety: false,
       disclaimerAccepted: false,
       showDisclaimer: true,
+      goal_iterations: 30,
     },
     saveBgDialogVisible: false,
     newBgName: '',
