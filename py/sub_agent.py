@@ -50,7 +50,7 @@ class SubAgentExecutor:
         
         system_prompt = self._build_system_prompt(task, consensus_content)
         conversation_history.append({"role": "system", "content": system_prompt})
-        conversation_history.append({"role": "user", "content": f"请执行任务：\n\n{task.description}\n\n完成后整理结果并提交。"})
+        conversation_history.append({"role": "user", "content": f"请执行任务：\n\n{task.description}\n\n完成后必须调用 finish_task 工具并提供最终产出结果来结束任务。"})
         
         try:
             async with httpx.AsyncClient(timeout=600.0) as http_client:
@@ -88,13 +88,7 @@ class SubAgentExecutor:
                         context={"history": assistant_only_history, "current_iteration": iteration}
                     )
 
-                    # 智能检查完成状态
-                    is_complete = await self._check_task_completion_smart(task, conversation_history, http_client)
-                    if is_complete:
-                        final_res = await self._extract_final_result(task, conversation_history, http_client)
-                        return await self._finalize_task_record(task_id, task_center, final_res["full"], assistant_only_history, iteration)
-                    
-                    conversation_history.append({"role": "user", "content": "请继续执行。完成后请明确总结并提交。"})
+                    conversation_history.append({"role": "user", "content": "请审视你的任务是否已经完成？如果已完成，请调用 finish_task 工具并提供最终产出结果来标记任务完成；如果尚未完成，请继续执行。"})
                 
                 return {"success": False, "error": "Max iterations reached"}
 
@@ -353,27 +347,10 @@ class SubAgentExecutor:
 
     def _build_system_prompt(self, task, consensus_content):
         p = f"你是一个专业的任务执行助手。\n【任务】ID: {task.task_id} | 标题: {task.title}"
+        p += f"\n\n当你确认任务已经完成时，必须调用 finish_task 工具来结束任务。调用时需提供 task_id（当前任务ID: {task.task_id}）和 result（你的最终执行产出结果）。在调用 finish_task 之前不要停止。"
         if consensus_content: p += f"\n\n【共识规范】\n{consensus_content}"
         return p
 
-    async def _check_task_completion_smart(self, task, conversation_history, http_client):
-        msgs =[{"role": "system", "content": "判断任务目标是否已达成？只回YES/NO"}, {"role": "user", "content": f"目标:{task.description}\n历史:{str(conversation_history)[-2000:]}"}]
-        try:
-            resp = await http_client.post(self.simple_chat_endpoint, json={"messages": msgs, "model": "super-model"})
-            return resp.json()["choices"][0]["message"]["content"].strip().upper().startswith("YES")
-        except Exception as e:
-            # 加入日志，不要悄悄失败
-            print(f"[_check_task_completion_smart] 兜底检查请求失败: {e}")
-            return False
-
-    async def _extract_final_result(self, task, conversation_history, http_client):
-        msgs =[{"role": "system", "content": "请从对话中提取出任务的最终执行产出。"}, {"role": "user", "content": f"历史:{str(conversation_history)[-4000:]}"}]
-        try:
-            resp = await http_client.post(self.simple_chat_endpoint, json={"messages": msgs, "model": "super-model"})
-            return {"full": resp.json()["choices"][0]["message"]["content"].strip()}
-        except Exception as e:
-            print(f"[_extract_final_result] 结果提取请求失败: {e}")
-            return {"full": "任务执行完成，未提取到明确结果。"}
 
 async def run_subtask_in_background(task_id: str, workspace_dir: str, settings: Dict, consensus_content: Optional[str] = None):
     executor = SubAgentExecutor(workspace_dir, settings)

@@ -2022,6 +2022,7 @@ function updateElement(el, rawMarkdown, formatFn) {
                                     <el-dropdown-item @click="localEnvSettings.permissionMode='auto-approve'; autoSaveSettings()">{{ t('acceptEdits') }}</el-dropdown-item>
                                     <el-dropdown-item @click="localEnvSettings.permissionMode='yolo'; autoSaveSettings()">{{ t('danger')+t('bypassPermissions') }}</el-dropdown-item>
                                     <el-dropdown-item @click="localEnvSettings.permissionMode='cowork'; autoSaveSettings()">{{ t('danger')+t('coworkPermissionMode') }}</el-dropdown-item>
+                                    <el-dropdown-item @click="localEnvSettings.permissionMode='goal'; autoSaveSettings()">{{ t('danger')+t('goalPermissionMode') }}</el-dropdown-item>
                                   </template>
                                   <!-- Docker Sandbox (DS) 选项 -->
                                   <template v-else-if="CLISettings.engine === 'ds'">
@@ -2030,6 +2031,7 @@ function updateElement(el, rawMarkdown, formatFn) {
                                     <el-dropdown-item @click="dsSettings.permissionMode='auto-approve'; autoSaveSettings()">{{ t('acceptEdits') }}</el-dropdown-item>
                                     <el-dropdown-item @click="dsSettings.permissionMode='yolo'; autoSaveSettings()">{{ t('bypassPermissions') }}</el-dropdown-item>
                                     <el-dropdown-item @click="dsSettings.permissionMode='cowork'; autoSaveSettings()">{{ t('coworkPermissionMode') }}</el-dropdown-item>
+                                    <el-dropdown-item @click="dsSettings.permissionMode='goal'; autoSaveSettings()">{{ t('goalPermissionMode') }}</el-dropdown-item>
                                   </template>
                                   <!-- ACP 选项 -->
                                   <template v-else-if="CLISettings.engine === 'acp'">
@@ -2038,6 +2040,7 @@ function updateElement(el, rawMarkdown, formatFn) {
                                     <el-dropdown-item @click="acpSettings.permissionMode='acceptEdits'; autoSaveSettings()">{{ t('acceptEdits') }}</el-dropdown-item>
                                     <el-dropdown-item @click="acpSettings.permissionMode='yolo'; autoSaveSettings()">{{ t('danger')+t('bypassPermissions') }}</el-dropdown-item>
                                     <el-dropdown-item @click="acpSettings.permissionMode='cowork'; autoSaveSettings()">{{ t('danger')+t('coworkPermissionMode') }}</el-dropdown-item>
+                                    <el-dropdown-item @click="acpSettings.permissionMode='goal'; autoSaveSettings()">{{ t('danger')+t('goalPermissionMode') }}</el-dropdown-item>
                                   </template>
                                 </el-dropdown-menu>
                               </template>

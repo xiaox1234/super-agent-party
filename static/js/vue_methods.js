@@ -11112,6 +11112,18 @@ processMarkdownStreamForTTS(message, deltaText, isFinal = false) {
     // 自动保存设置
     this.autoSaveSettings();
   },
+
+  // 判断当前引擎是否处于 Goal 模式
+  isGoalModeActive() {
+    const engine = this.CLISettings.engine;
+    if (engine === 'local') {
+      return this.localEnvSettings.permissionMode === 'goal';
+    } else if (engine === 'ds') {
+      return this.dsSettings.permissionMode === 'goal';
+    } else {
+      return this.acpSettings.permissionMode === 'goal';
+    }
+  },
   
  
     // 加载默认模型列表

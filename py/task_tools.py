@@ -96,6 +96,21 @@ finish_task_tool = {
     }
 }
 
+finish_main_task_tool = {
+    "type": "function",
+    "function": {
+        "name": "finish_main_task",
+        "description": "主智能体任务完成确认工具。当你确认用户的任务已经全部达成时，必须调用此工具来标记任务完成并停止后续操作。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "result": {"type": "string", "description": "你的最终执行产出结果，需详细总结你完成的工作内容。"}
+            },
+            "required": ["result"]
+        }
+    }
+}
+
 # --- Tool Implementations ---
 
 async def create_subtask(
@@ -287,3 +302,9 @@ async def finish_task(
         return f"🎉 任务 {task_id} 已成功标记为完成！结果已保存。请停止后续操作。"
     else:
         return f"❌ 任务 {task_id} 状态更新失败（可能任务ID错误）。"
+
+async def finish_main_task(
+    result: str
+) -> str:
+    """主智能体调用此函数来标记任务完成（无需 task_center）"""
+    return f"🎉 主任务已完成。最终结果：\n\n{result}"

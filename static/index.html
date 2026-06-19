@@ -2184,6 +2184,7 @@ function updateElement(el, rawMarkdown, formatFn) {
                                     <el-dropdown-item @click="localEnvSettings.permissionMode='auto-approve'; autoSaveSettings()">{{ t('acceptEdits') }}</el-dropdown-item>
                                     <el-dropdown-item @click="localEnvSettings.permissionMode='yolo'; autoSaveSettings()">{{ t('danger')+t('bypassPermissions') }}</el-dropdown-item>
                                     <el-dropdown-item @click="localEnvSettings.permissionMode='cowork'; autoSaveSettings()">{{ t('danger')+t('coworkPermissionMode') }}</el-dropdown-item>
+                                    <el-dropdown-item @click="localEnvSettings.permissionMode='goal'; autoSaveSettings()">{{ t('danger')+t('goalPermissionMode') }}</el-dropdown-item>
                                   </template>
                                   <!-- Docker Sandbox (DS) 选项 -->
                                   <template v-else-if="CLISettings.engine === 'ds'">
@@ -2192,6 +2193,7 @@ function updateElement(el, rawMarkdown, formatFn) {
                                     <el-dropdown-item @click="dsSettings.permissionMode='auto-approve'; autoSaveSettings()">{{ t('acceptEdits') }}</el-dropdown-item>
                                     <el-dropdown-item @click="dsSettings.permissionMode='yolo'; autoSaveSettings()">{{ t('bypassPermissions') }}</el-dropdown-item>
                                     <el-dropdown-item @click="dsSettings.permissionMode='cowork'; autoSaveSettings()">{{ t('coworkPermissionMode') }}</el-dropdown-item>
+                                    <el-dropdown-item @click="dsSettings.permissionMode='goal'; autoSaveSettings()">{{ t('goalPermissionMode') }}</el-dropdown-item>
                                   </template>
                                   <!-- ACP 选项 -->
                                   <template v-else-if="CLISettings.engine === 'acp'">
@@ -2200,6 +2202,7 @@ function updateElement(el, rawMarkdown, formatFn) {
                                     <el-dropdown-item @click="acpSettings.permissionMode='acceptEdits'; autoSaveSettings()">{{ t('acceptEdits') }}</el-dropdown-item>
                                     <el-dropdown-item @click="acpSettings.permissionMode='yolo'; autoSaveSettings()">{{ t('danger')+t('bypassPermissions') }}</el-dropdown-item>
                                     <el-dropdown-item @click="acpSettings.permissionMode='cowork'; autoSaveSettings()">{{ t('danger')+t('coworkPermissionMode') }}</el-dropdown-item>
+                                    <el-dropdown-item @click="acpSettings.permissionMode='goal'; autoSaveSettings()">{{ t('danger')+t('goalPermissionMode') }}</el-dropdown-item>
                                   </template>
                                 </el-dropdown-menu>
                               </template>
@@ -9922,6 +9925,7 @@ function updateElement(el, rawMarkdown, formatFn) {
                             <el-option :label="t('acceptEdits')" value="auto-approve" ></el-option>
                             <el-option :label="t('danger')+t('bypassPermissions')" value="yolo" ></el-option>
                             <el-option :label="t('danger')+t('coworkPermissionMode')" value="cowork" ></el-option>
+                            <el-option :label="t('danger')+t('goalPermissionMode')" value="goal" ></el-option>
                           </el-select>
                         </el-form-item>
 
@@ -9998,6 +10002,7 @@ function updateElement(el, rawMarkdown, formatFn) {
                             <el-option :label="t('acceptEdits')" value="auto-approve" ></el-option>
                             <el-option :label="t('danger')+t('bypassPermissions')" value="yolo" ></el-option>
                             <el-option :label="t('danger')+t('coworkPermissionMode')" value="cowork" ></el-option>
+                            <el-option :label="t('danger')+t('goalPermissionMode')" value="goal" ></el-option>
                           </el-select>
                         </el-form-item>
 
@@ -10080,6 +10085,7 @@ function updateElement(el, rawMarkdown, formatFn) {
                             <el-option :label="t('acceptEdits')" value="auto-approve" ></el-option>
                             <el-option :label="t('bypassPermissions')" value="yolo" ></el-option>
                             <el-option :label="t('coworkPermissionMode')" value="cowork" ></el-option>
+                            <el-option :label="t('goalPermissionMode')" value="goal" ></el-option>
                           </el-select>
                         </el-form-item>
 
@@ -12390,6 +12396,25 @@ function updateElement(el, rawMarkdown, formatFn) {
                       <el-switch v-model="systemSettings.showDisclaimer" @change="autoSaveSettings" :disabled="isSteamBuild"></el-switch>
                     </div>
                     <span class="tool-desc">{{ t('safetyDisclaimerToggleNotice') }}</span>
+                  </div>
+
+                  <div class="tool-item" v-if="isGoalModeActive()">
+                    <div class="tool-header">
+                      <span>
+                        <el-icon><i class="fa-solid fa-rotate"></i></el-icon>
+                        {{ t('goalMaxIterations') }}
+                      </span>
+                    </div>
+                    <el-slider
+                      v-model="systemSettings.goal_iterations"
+                      :min="1"
+                      :max="100"
+                      :step="1"
+                      show-input
+                      style="width: 100%; margin-top: 8px;"
+                      @input="autoSaveSettings"
+                    />
+                    <span class="tool-desc">{{ t('goalMaxIterationsDesc') }}</span>
                   </div>
 
                   <!-- 数据存储路径设置 -->
