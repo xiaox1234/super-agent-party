@@ -10129,10 +10129,14 @@ processMarkdownStreamForTTS(message, deltaText, isFinal = false) {
 
         const flushQueue = () => {
             if (!sourceBuffer || sourceBuffer.updating) return;
-            while (pendingChunks.length > 0) {
-                try { sourceBuffer.appendBuffer(pendingChunks.shift()); } catch (e) { break; }
-            }
-            if (streamDone && pendingChunks.length === 0) {
+            if (pendingChunks.length > 0) {
+                try { 
+                    // 每次只送入一个音频块，剩余的等待底层的 updateend 事件自动触发
+                    sourceBuffer.appendBuffer(pendingChunks.shift()); 
+                } catch (e) { 
+                    console.error('appendBuffer failed:', e); 
+                }
+            } else if (streamDone) {
                 try { ms.endOfStream(); } catch (e) {}
             }
         };
@@ -10211,26 +10215,22 @@ processMarkdownStreamForTTS(message, deltaText, isFinal = false) {
             try {
                 while (true) {
                     const { done, value } = await reader.read();
-                    if (done) { streamDone = true; break; }
+                    if (done) { 
+                        streamDone = true; 
+                        flushQueue(); 
+                        break; 
+                    }
                     allChunks.push(value);
-                    if (sourceBuffer) {
-                        if (sourceBuffer.updating) {
-                            pendingChunks.push(value);
-                        } else {
-                            try { sourceBuffer.appendBuffer(value); } catch (e) { sourceBuffer = null; }
-                        }
-                    } else {
-                        pendingChunks.push(value);
-                    }
+                    pendingChunks.push(value);
+                    flushQueue();
                 }
+                // 等待队列中的音频全部被底层解码器消化完毕
                 while (sourceBuffer && (sourceBuffer.updating || pendingChunks.length > 0)) {
-                    if (!sourceBuffer.updating && pendingChunks.length > 0) {
-                        try { sourceBuffer.appendBuffer(pendingChunks.shift()); } catch (e) { break; }
-                    }
-                    await new Promise(r => setTimeout(r, 10));
+                    await new Promise(r => setTimeout(r, 50));
                 }
-                try { ms.endOfStream(); } catch (e) {}
-            } catch (e) {}
+            } catch (e) {
+                console.error("Stream reader error:", e);
+            }
 
             const totalLength = allChunks.reduce((sum, c) => sum + c.length, 0);
             const completeBuffer = new Uint8Array(totalLength);
