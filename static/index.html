@@ -6332,7 +6332,8 @@ function updateElement(el, rawMarkdown, formatFn) {
                   v-model="showAddDialog"
                   id="show-Add-Dialog"
                   :title="t('addNewProvider')"
-                  width="900px"
+                  width="80%"
+                  top="5vh"
                   @closed="newProviderTemp = { vendor: '', url: '', apiKey: '', modelId: '', models: [], modelsLoading: false, connectionStatus: null }; searchQuery = ''; activeCategory = 'all'"
                 >
                   <!-- 搜索和分类过滤 —— 双栏上方全宽 -->
