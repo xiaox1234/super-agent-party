@@ -52,7 +52,7 @@
 ![image](doc/image/img-1/vision.jpeg)
 
 #### 多种窗口模式：聊天界面支持手机大小、胶囊大小停靠在桌面上
-![image](doc/image/img-1/window.jpeg)
+![image](doc/image/img-1/windowmode.jpeg)
 
 #### 多角色群聊：支持酒馆角色卡，支持长期记忆，你可以同时和多个角色一起聊天！
 ![image](doc/image/img-1/group.jpeg)

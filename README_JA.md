@@ -52,7 +52,7 @@
 ![image](doc/image/img-2/vision.jpeg)
 
 #### 複数のウィンドウモード：チャットインターフェースはスマートフォンサイズやカプセルサイズでデスクトップにドッキング可能
-![image](doc/image/img-1/window.jpeg)
+![image](doc/image/img-1/windowmode.jpeg)
 
 #### マルチロールグループチャット：タバーンキャラクターカードと長期記憶に対応し、複数のキャラクターと同時にチャットできます！
 ![image](doc/image/img-2/group.jpeg)

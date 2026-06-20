@@ -53,7 +53,7 @@
 ![image](doc/image/img-2/vision.jpeg)
 
 #### Multiple Window Modes: The chat interface supports phone-sized and capsule-sized docking on the desktop
-![image](doc/image/img-1/window.jpeg)
+![image](doc/image/img-1/windowmode.jpeg)
 
 #### Multi-Role Group Chat: Supports tavern character cards and long-term memory, allowing you to chat with multiple characters simultaneously!
 ![image](doc/image/img-2/group.jpeg)
