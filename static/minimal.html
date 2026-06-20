@@ -27,7 +27,7 @@
       justify-content: flex-end;
       height: 100%;
       background: transparent;
-      padding: 16px 20px 2px 20px;
+      padding: 16px 20px 12px 20px;
     }
 
     /* 消息瀑布流 — contain 解决透明窗口下气泡层不跟随滚动的问题 */
@@ -41,16 +41,8 @@
       display: flex;
       flex-direction: column-reverse;
       gap: 10px;
-      padding: 12px 4px 10px 4px;
+      padding: 12px 14px 10px 14px;
       scrollbar-width: none;
-    }
-    /* GPU 合成层仅在窗口聚焦时启用：避免透明窗口失焦时合成层丢失 alpha，
-       在消息区域出现一整块不透明的“气泡”背景 */
-    #message-area.gpu-accel {
-      contain: paint;
-      will-change: scroll-position;
-      -webkit-transform: translateZ(0);
-      transform: translateZ(0);
     }
     #message-area::-webkit-scrollbar { display: none; }
     #message-area.empty { display: none; }
@@ -66,6 +58,7 @@
       line-height: 1.6;
       word-break: break-word;
       flex-shrink: 0;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.12), 0 8px 20px rgba(0,0,0,0.12);
     }
 
     .msg-assistant-wrapper {
@@ -89,18 +82,76 @@
       width: fit-content;
       max-width: 100%;
       display: block;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.12), 0 8px 20px rgba(0,0,0,0.12);
     }
     .msg-bubble:empty { display: none; }
-    .msg-bubble pre { margin: 0 !important; border-radius: 10px; font-size: 12px; overflow-x: auto; }
+    .msg-bubble pre { margin: 0 !important; border-radius: 10px; font-size: 12px; white-space: pre-wrap; word-wrap: break-word; overflow-wrap: break-word; }
     .msg-bubble code { font-family: 'SF Mono','Fira Code','Cascadia Code',monospace; font-size: 12.5px; }
-    .msg-bubble pre code { font-size: 12px; }
-    .msg-bubble img { max-width: 100%; border-radius: 8px; }
+    .msg-bubble pre code { font-size: 12px; white-space: pre-wrap; word-wrap: break-word; }
+    .msg-bubble img { max-width: 100%; max-height: 50vh; height: auto; display: block; object-fit: contain; border-radius: 8px; }
     .msg-bubble p { margin: 0; }
     .msg-bubble p + p { margin-top: 0.4em; }
     .msg-bubble ul, .msg-bubble ol { margin: 0; padding-left: 1.5em; }
     .msg-bubble blockquote { margin: 0; padding-left: 12px; border-left: 3px solid var(--el-border-color-darker); color: var(--el-text-color-secondary); }
     .msg-bubble table { font-size: 12px; border-collapse: collapse; width: 100%; }
     .msg-bubble th, .msg-bubble td { padding: 4px 8px; border: 1px solid var(--el-border-color-lighter); }
+
+    /* 媒体类气泡：图片、代码块、表格直接填充满整个气泡（无边框、无内边距、贴边） */
+    .msg-bubble--fill,
+    .msg-bubble:has(> pre:only-child),
+    .msg-bubble:has(> table:only-child),
+    .msg-bubble:has(> p:only-child > img:only-child),
+    .msg-bubble:has(> p:only-child > video:only-child) {
+      padding: 0 !important;
+      border: none;
+      overflow: hidden;
+      max-width: 100%;
+    }
+    .msg-bubble--fill > pre,
+    .msg-bubble:has(> pre:only-child) > pre {
+      margin: 0 !important;
+      width: 100%;
+      display: block;
+      padding: 12px 14px;
+      max-width: 100%;
+      line-height: 1.5;
+      border-radius: inherit;
+    }
+    .msg-bubble--fill > pre code,
+    .msg-bubble:has(> pre:only-child) > pre code { border-radius: inherit; line-height: 1.5; }
+    .msg-bubble--fill > table,
+    .msg-bubble:has(> table:only-child) > table {
+      margin: 0 !important;
+      width: 100%;
+      max-width: 100%;
+      line-height: 1.5;
+      border-radius: inherit;
+    }
+    /* 仅图片/视频包裹层去除行高造成的底部缝隙 */
+    .msg-bubble--fill > p,
+    .msg-bubble--fill > a,
+    .msg-bubble--fill > div,
+    .msg-bubble--fill > figure,
+    .msg-bubble--fill > picture {
+      margin: 0 !important;
+      padding: 0 !important;
+      border: none;
+      display: block;
+    }
+    .msg-bubble--fill > p:has(> img),
+    .msg-bubble--fill > p:has(> video),
+    .msg-bubble--fill > a:has(> img),
+    .msg-bubble--fill > figure,
+    .msg-bubble--fill > picture { line-height: 0; }
+    .msg-bubble--fill img,
+    .msg-bubble--fill video {
+      display: block;
+      width: 100%;
+      max-width: 100%;
+      max-height: 50vh;
+      object-fit: contain;
+      border-radius: inherit;
+    }
 
     .msg-think {
       padding: 8px 14px;
@@ -111,12 +162,21 @@
       color: var(--el-text-color-secondary);
       width: fit-content;
       max-width: 100%;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.10), 0 5px 14px rgba(0,0,0,0.09);
     }
 
     .input-container {
       -webkit-app-region: no-drag;
       flex-shrink: 0;
       position: relative;
+    }
+
+    .hero-input-wrapper {
+      background: var(--el-bg-color);
+      border: 1px solid var(--el-border-color-lighter);
+      border-radius: 20px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.18), 0 12px 32px rgba(0,0,0,0.16);
+      overflow: hidden;
     }
 
     #close-btn {
@@ -292,16 +352,74 @@
         var div = document.createElement('div');
         div.innerHTML = html;
         var blocks = [], buf = '';
-        var isBlock = function(el) { return /^(P|PRE|UL|OL|BLOCKQUOTE|TABLE|H[1-6]|HR)$/.test(el.tagName); };
+        var isBlock = function(el) { return /^(P|PRE|UL|OL|BLOCKQUOTE|TABLE|H[1-6])$/.test(el.tagName); };
+        var flush = function() { if (buf.trim()) blocks.push('<p>' + buf.trim() + '</p>'); buf = ''; };
         for (var i = 0; i < div.childNodes.length; i++) {
           var n = div.childNodes[i];
+          if (n.nodeType === 1 && n.tagName === 'HR') { flush(); continue; }
           if (n.nodeType === 3) { buf += n.textContent; }
-          else if (n.nodeType === 1 && isBlock(n)) { if (buf.trim()) { blocks.push('<p>' + buf.trim() + '</p>'); buf = ''; } blocks.push(n.outerHTML); }
+          else if (n.nodeType === 1 && isBlock(n)) { flush(); blocks.push(n.outerHTML); }
           else if (n.nodeType === 1) { buf += n.outerHTML || n.textContent || ''; }
           else { buf += n.textContent || ''; }
         }
-        if (buf.trim()) blocks.push('<p>' + buf.trim() + '</p>');
+        flush();
         return blocks;
+      }
+
+      function isMeaningfulBubble(bubble) {
+        if (bubble.querySelector('img, pre, table, code, video')) return true;
+        return !!(bubble.textContent && bubble.textContent.trim());
+      }
+
+      function meaningfulChildren(el) {
+        var kids = [];
+        for (var i = 0; i < el.childNodes.length; i++) {
+          var n = el.childNodes[i];
+          if (n.nodeType === 3 && !n.textContent.trim()) continue;
+          kids.push(n);
+        }
+        return kids;
+      }
+
+      function markFillBubble(bubble) {
+        var text = (bubble.textContent || '').trim();
+        var imgs = bubble.querySelectorAll('img, video');
+        var pres = bubble.querySelectorAll('pre');
+        var tables = bubble.querySelectorAll('table');
+        // 纯图片/视频：无文字、仅一个媒体（忽略 <p>/<a>/<div> 等任意包裹层）
+        if (!text && imgs.length === 1 && pres.length === 0 && tables.length === 0) {
+          bubble.classList.add('msg-bubble--fill');
+          return;
+        }
+        // 单独的代码块或表格
+        var kids = meaningfulChildren(bubble);
+        if (kids.length === 1 && kids[0].nodeType === 1) {
+          var tag = kids[0].tagName;
+          if (tag === 'PRE' || tag === 'TABLE') bubble.classList.add('msg-bubble--fill');
+        }
+      }
+
+      function appendBubbles(raw, wrapper) {
+        var blks;
+        try { blks = splitBlocks(md.render(raw)); }
+        catch(e) {
+          var b = document.createElement('div');
+          b.className = 'msg-bubble';
+          b.textContent = raw;
+          wrapper.appendChild(b);
+          return true;
+        }
+        var added = false;
+        for (var k = 0; k < blks.length; k++) {
+          var bubble = document.createElement('div');
+          bubble.className = 'msg-bubble markdown-body';
+          bubble.innerHTML = blks[k];
+          if (!isMeaningfulBubble(bubble)) continue;
+          markFillBubble(bubble);
+          wrapper.appendChild(bubble);
+          added = true;
+        }
+        return added;
       }
 
       var msgArea = document.getElementById('message-area');
@@ -389,23 +507,7 @@
 
             if (bk.role === 'assistant' && raw.trim()) {
               // Assistant speech -> render as QQ bubbles
-              try {
-                var html = md.render(raw);
-                var blks = splitBlocks(html);
-                for (var k = 0; k < blks.length; k++) {
-                  var bubble = document.createElement('div');
-                  bubble.className = 'msg-bubble';
-                  bubble.innerHTML = blks[k];
-                  wrapper.appendChild(bubble);
-                  hasContent = true;
-                }
-              } catch(e) {
-                var bubble = document.createElement('div');
-                bubble.className = 'msg-bubble';
-                bubble.textContent = raw;
-                wrapper.appendChild(bubble);
-                hasContent = true;
-              }
+              if (appendBubbles(raw, wrapper)) hasContent = true;
             } else if (bk.role === 'tool' || bk.role === 'tool_result') {
               var think = document.createElement('div');
               think.className = 'msg-think';
@@ -420,21 +522,7 @@
         // Fallback: if no backend_content, use content
         var c = msg.content || msg.pure_content || '';
         if (c.trim() && !hasContent) {
-          try {
-            var html2 = md.render(c);
-            var blks2 = splitBlocks(html2);
-            for (var k2 = 0; k2 < blks2.length; k2++) {
-              var bubble = document.createElement('div');
-              bubble.className = 'msg-bubble';
-              bubble.innerHTML = blks2[k2];
-              wrapper.appendChild(bubble);
-            }
-          } catch(e) {
-            var bubble = document.createElement('div');
-            bubble.className = 'msg-bubble';
-            bubble.textContent = c;
-            wrapper.appendChild(bubble);
-          }
+          appendBubbles(c, wrapper);
         }
       }
 
@@ -743,15 +831,6 @@
       }
       connectWS();
       userInput.value = '';
-
-      // 透明窗口失焦时移除 GPU 合成层，避免消息区域出现整块不透明背景
-      function applyGpuAccel() {
-        if (document.hasFocus()) msgArea.classList.add('gpu-accel');
-        else msgArea.classList.remove('gpu-accel');
-      }
-      window.addEventListener('focus', applyGpuAccel);
-      window.addEventListener('blur', applyGpuAccel);
-      applyGpuAccel();
 
       setTimeout(function() { userInput.focus(); }, 400);
     })();
