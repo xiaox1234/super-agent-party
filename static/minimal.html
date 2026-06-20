@@ -183,6 +183,55 @@
     #send-btn:hover { transform: scale(1.08); filter: brightness(1.1); }
     #send-btn:active { transform: scale(0.95); }
     #send-btn:disabled { opacity: 0.25; cursor: not-allowed; transform: none; filter: none; }
+
+    #ptt-btn {
+      background: var(--el-fill-color-light, rgba(128,128,128,0.08));
+      border: none;
+      border-radius: 50%;
+      width: 34px;
+      height: 34px;
+      margin-right: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      color: var(--el-text-color-secondary, #888);
+      font-size: 14px;
+      transition: all 0.15s;
+      flex-shrink: 0;
+      -webkit-user-select: none;
+      user-select: none;
+      -webkit-touch-callout: none;
+    }
+    #ptt-btn:hover { color: var(--el-color-primary); }
+    #ptt-btn.recording {
+      background: #ff3b30;
+      color: #fff;
+      animation: ptt-pulse 1.2s ease-in-out infinite;
+    }
+    @keyframes ptt-pulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(255, 59, 48, 0.45); }
+      50% { box-shadow: 0 0 0 6px rgba(255, 59, 48, 0); }
+    }
+
+    #tts-btn {
+      background: transparent;
+      border: none;
+      border-radius: 50%;
+      width: 32px;
+      height: 32px;
+      margin-left: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      color: var(--el-text-color-secondary, #888);
+      font-size: 15px;
+      transition: all 0.15s;
+      flex-shrink: 0;
+    }
+    #tts-btn:hover { color: var(--el-color-primary); }
+    #tts-btn.enabled { color: var(--el-color-primary); }
   </style>
 </head>
 <body style="background: transparent;">
@@ -202,7 +251,13 @@
             style="background:transparent;border:none;color:var(--el-text-color-secondary);font-size:15px;cursor:pointer;width:32px;height:32px;display:flex;align-items:center;justify-content:center;border-radius:50%;transition:all 0.15s;">
             <i class="fa-solid fa-comment-medical"></i>
           </button>
+          <button id="tts-btn" title="语音合成">
+            <i class="fa-solid fa-volume-xmark"></i>
+          </button>
           <div id="drag-bar"></div>
+          <button id="ptt-btn" title="按住说话">
+            <i class="fa-solid fa-microphone"></i>
+          </button>
           <button id="send-btn" disabled title="发送 (Enter)">
             <i class="fa-solid fa-paper-plane"></i>
           </button>
@@ -250,12 +305,16 @@
       var sendBtn = document.getElementById('send-btn');
       var closeBtn = document.getElementById('close-btn');
       var newChatBtn = document.getElementById('new-chat-btn');
+      var pttBtn = document.getElementById('ptt-btn');
+      var ttsBtn = document.getElementById('tts-btn');
 
       var ws = null;
       var messages = [];
       var isGenerating = false;
       var hbTimer = null;
       var reconnTimer = null;
+      var cachedSettings = null;
+      var ttsEnabled = false;
 
       function connectWS() {
         var p = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -287,8 +346,13 @@
           case 'settings':
           case 'settings_update':
             if (data.data) {
+              cachedSettings = data.data;
               var theme = (data.data.systemSettings && data.data.systemSettings.theme) || data.data.theme;
               if (theme) document.documentElement.setAttribute('data-theme', theme);
+              if (data.data.ttsSettings) {
+                ttsEnabled = !!data.data.ttsSettings.enabled;
+                updateTtsButton();
+              }
             }
             break;
           case 'messages_update':
@@ -413,10 +477,19 @@
 
       function sendMessage() {
         var text = userInput.value.trim();
+        console.log('[minimal] sendMessage text=', JSON.stringify(text), 'wsOpen=', !!(ws && ws.readyState === WebSocket.OPEN));
         if (!text || !ws || ws.readyState !== WebSocket.OPEN) return;
 
         ws.send(JSON.stringify({ type: 'set_user_input', data: { text: text } }));
-        ws.send(JSON.stringify({ type: 'trigger_send_message', data: {} }));
+        console.log('[minimal] sent set_user_input');
+        setTimeout(function() {
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'trigger_send_message', data: {} }));
+            console.log('[minimal] sent trigger_send_message');
+          } else {
+            console.log('[minimal] trigger NOT sent, ws not open');
+          }
+        }, 300);
 
         userInput.value = '';
         userInput.style.height = 'auto';
@@ -442,6 +515,202 @@
         } else { window.close(); }
       }
 
+      // ===== TTS 开关：远程控制主界面的语音合成开关 =====
+      function updateTtsButton() {
+        var icon = ttsBtn.querySelector('i');
+        if (ttsEnabled) {
+          ttsBtn.classList.add('enabled');
+          if (icon) icon.className = 'fa-solid fa-volume-high';
+        } else {
+          ttsBtn.classList.remove('enabled');
+          if (icon) icon.className = 'fa-solid fa-volume-xmark';
+        }
+      }
+
+      function toggleTTS() {
+        if (!ws || ws.readyState !== WebSocket.OPEN || !cachedSettings) return;
+        if (!cachedSettings.ttsSettings) cachedSettings.ttsSettings = {};
+        ttsEnabled = !ttsEnabled;
+        cachedSettings.ttsSettings.enabled = ttsEnabled;
+        updateTtsButton();
+        ws.send(JSON.stringify({ type: 'save_settings', data: cachedSettings, correlationId: genId() }));
+      }
+
+      // ===== 语音识别 PTT（按住说话）=====
+      var asrWs = null;
+      var asrReconnTimer = null;
+      var isPttRecording = false;
+      var isProcessingPtt = false;
+      var waitingForPttResult = false;
+      var pttFinalText = '';
+      var pttMediaRecorder = null;
+      var pttStream = null;
+      var pttChunks = [];
+
+      function genId() {
+        return 'xxxxxxxxxxxx4xxxyxxxxxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+          var r = Math.random() * 16 | 0;
+          return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+        });
+      }
+
+      function initASRWebSocket() {
+        if (asrWs && (asrWs.readyState === WebSocket.OPEN || asrWs.readyState === WebSocket.CONNECTING)) return;
+        if (asrWs) { asrWs.onclose = null; try { asrWs.close(); } catch(_) {} asrWs = null; }
+        var p = location.protocol === 'https:' ? 'wss:' : 'ws:';
+        asrWs = new WebSocket(p + '//' + location.host + '/ws/asr');
+        asrWs.onopen = function() {
+          if (asrWs && asrWs.readyState === WebSocket.OPEN) asrWs.send(JSON.stringify({ type: 'init' }));
+        };
+        asrWs.onmessage = function(e) { try { handleASRResult(JSON.parse(e.data)); } catch(_) {} };
+        asrWs.onclose = function() {
+          if (asrWs !== null && !asrReconnTimer) {
+            asrReconnTimer = setTimeout(function() { asrReconnTimer = null; initASRWebSocket(); }, 3000);
+          }
+        };
+        asrWs.onerror = function() {};
+      }
+
+      function handleASRResult(data) {
+        if (data.type === 'transcription') {
+          if (data.is_final) {
+            pttFinalText += (data.text || '');
+            userInput.value = pttFinalText;
+            if (waitingForPttResult) {
+              waitingForPttResult = false;
+              var txt = pttFinalText.trim();
+              pttFinalText = '';
+              if (txt) { userInput.value = txt; sendMessage(); }
+              else { userInput.value = ''; sendBtn.disabled = true; }
+            }
+          } else {
+            userInput.value = pttFinalText + (data.text || '');
+            sendBtn.disabled = !userInput.value.trim();
+          }
+        } else if (data.type === 'error') {
+          waitingForPttResult = false;
+          pttFinalText = '';
+        }
+      }
+
+      function pttPress(e) {
+        if (e && e.preventDefault && e.type !== 'touchstart') e.preventDefault();
+        if (isPttRecording || isProcessingPtt) return;
+        isPttRecording = true;
+        pttFinalText = '';
+        pttChunks = [];
+        pttBtn.classList.add('recording');
+        initASRWebSocket();
+        navigator.mediaDevices.getUserMedia({ audio: true }).then(function(stream) {
+          if (!isPttRecording) { stream.getTracks().forEach(function(t){ t.stop(); }); return; }
+          pttStream = stream;
+          var options = { mimeType: 'audio/webm' };
+          if (!MediaRecorder.isTypeSupported('audio/webm')) options = { mimeType: 'audio/mp4' };
+          pttMediaRecorder = new MediaRecorder(stream, options);
+          pttMediaRecorder.ondataavailable = function(ev) { if (ev.data && ev.data.size > 0) pttChunks.push(ev.data); };
+          pttMediaRecorder.start();
+        }).catch(function(err) {
+          console.error('PTT mic error:', err);
+          isPttRecording = false;
+          pttBtn.classList.remove('recording');
+        });
+      }
+
+      function pttRelease(e) {
+        if (e && e.preventDefault && e.type !== 'touchend') e.preventDefault();
+        if (!isPttRecording) return;
+        isPttRecording = false;
+        pttBtn.classList.remove('recording');
+        if (!pttMediaRecorder) {
+          if (pttStream) { pttStream.getTracks().forEach(function(t){ t.stop(); }); pttStream = null; }
+          return;
+        }
+        isProcessingPtt = true;
+        pttMediaRecorder.onstop = function() {
+          if (pttStream) { pttStream.getTracks().forEach(function(t){ t.stop(); }); pttStream = null; }
+          processAndSendPtt().then(function() {
+            isProcessingPtt = false;
+            pttMediaRecorder = null;
+          });
+        };
+        if (pttMediaRecorder.state !== 'inactive') pttMediaRecorder.stop();
+      }
+
+      function processAndSendPtt() {
+        if (!pttChunks.length) return Promise.resolve();
+        var mimeType = pttMediaRecorder ? pttMediaRecorder.mimeType : 'audio/webm';
+        var rawBlob = new Blob(pttChunks, { type: mimeType });
+        return convertBlobToWav(rawBlob, 16000).then(function(wavBlob) {
+          return sendPttToBackend(wavBlob);
+        }).catch(function(err) { console.error('PTT process error:', err); });
+      }
+
+      function sendPttToBackend(wavBlob) {
+        return new Promise(function(resolve) {
+          var doSend = function() {
+            var reader = new FileReader();
+            reader.readAsDataURL(wavBlob);
+            reader.onloadend = function() {
+              var base64data = reader.result.split(',')[1];
+              if (asrWs && asrWs.readyState === WebSocket.OPEN) {
+                waitingForPttResult = true;
+                asrWs.send(JSON.stringify({ type: 'audio_complete', id: genId(), audio: base64data, format: 'wav', sample_rate: 16000 }));
+              }
+              resolve();
+            };
+          };
+          if (!asrWs || asrWs.readyState !== WebSocket.OPEN) {
+            initASRWebSocket();
+            setTimeout(doSend, 500);
+          } else { doSend(); }
+        });
+      }
+
+      function convertBlobToWav(blob, targetSampleRate) {
+        return blob.arrayBuffer().then(function(arrayBuffer) {
+          var AudioCtx = window.AudioContext || window.webkitAudioContext;
+          var audioContext = new AudioCtx();
+          return audioContext.decodeAudioData(arrayBuffer).then(function(audioBuffer) {
+            var offlineCtx = new OfflineAudioContext(1, Math.ceil(audioBuffer.duration * targetSampleRate), targetSampleRate);
+            var source = offlineCtx.createBufferSource();
+            source.buffer = audioBuffer;
+            source.connect(offlineCtx.destination);
+            source.start();
+            return offlineCtx.startRendering().then(function(rendered) {
+              audioContext.close();
+              return bufferToWav(rendered);
+            });
+          });
+        });
+      }
+
+      function bufferToWav(abuffer) {
+        var numOfChan = abuffer.numberOfChannels;
+        var sampleRate = abuffer.sampleRate;
+        var numFrames = abuffer.length;
+        var length = numFrames * numOfChan * 2 + 44;
+        var buffer = new ArrayBuffer(length);
+        var view = new DataView(buffer);
+        var channels = [], i, ch, sample, pos = 0;
+        function setUint16(d) { view.setUint16(pos, d, true); pos += 2; }
+        function setUint32(d) { view.setUint32(pos, d, true); pos += 4; }
+        setUint32(0x46464952); setUint32(length - 8); setUint32(0x45564157);
+        setUint32(0x20746d66); setUint32(16); setUint16(1); setUint16(numOfChan);
+        setUint32(sampleRate); setUint32(sampleRate * numOfChan * 2);
+        setUint16(numOfChan * 2); setUint16(16);
+        setUint32(0x61746164); setUint32(length - pos - 4);
+        for (i = 0; i < numOfChan; i++) channels.push(abuffer.getChannelData(i));
+        for (i = 0; i < numFrames; i++) {
+          for (ch = 0; ch < numOfChan; ch++) {
+            sample = Math.max(-1, Math.min(1, channels[ch][i]));
+            sample = sample < 0 ? sample * 0x8000 : sample * 0x7FFF;
+            view.setInt16(pos, sample | 0, true);
+            pos += 2;
+          }
+        }
+        return new Blob([buffer], { type: 'audio/wav' });
+      }
+
       userInput.addEventListener('input', function() {
         this.style.height = 'auto';
         this.style.height = Math.min(this.scrollHeight, 120) + 'px';
@@ -453,6 +722,15 @@
       sendBtn.addEventListener('click', sendMessage);
       closeBtn.addEventListener('click', closeWindow);
       newChatBtn.addEventListener('click', newConversation);
+      ttsBtn.addEventListener('click', toggleTTS);
+
+      pttBtn.addEventListener('mousedown', pttPress);
+      pttBtn.addEventListener('mouseup', pttRelease);
+      pttBtn.addEventListener('mouseleave', function(e) { if (isPttRecording) pttRelease(e); });
+      pttBtn.addEventListener('touchstart', pttPress, { passive: false });
+      pttBtn.addEventListener('touchend', pttRelease, { passive: false });
+      pttBtn.addEventListener('touchcancel', pttRelease, { passive: false });
+      pttBtn.addEventListener('contextmenu', function(e) { e.preventDefault(); });
 
       if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
         document.documentElement.setAttribute('data-theme', 'dark');

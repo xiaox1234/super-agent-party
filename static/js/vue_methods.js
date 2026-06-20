@@ -2562,7 +2562,9 @@ formatMessage(content, index) {
         if (this.messages.length > 0) {
             const lastMsg = this.messages[this.messages.length - 1];
             if (lastMsg._currentAudio){
-                lastMsg._currentAudio.pause();
+                if (typeof lastMsg._currentAudio.pause === 'function') {
+                    lastMsg._currentAudio.pause();
+                }
                 lastMsg._currentAudio = null;
             }
         }
@@ -10553,7 +10555,7 @@ processMarkdownStreamForTTS(message, deltaText, isFinal = false) {
         message.audioAborted = true; 
         message.isPlaying = false;
         // 快速淡出并停止每一条消息正在播放的音频
-        if (message._currentAudio && !message._currentAudio.paused) {
+        if (message._currentAudio && typeof message._currentAudio.pause === 'function' && !message._currentAudio.paused) {
           const audio = message._currentAudio;
           const fadeSteps = 5;
           const fadeInterval = 30;
