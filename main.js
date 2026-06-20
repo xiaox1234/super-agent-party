@@ -995,7 +995,7 @@ app.whenReady().then(async () => {
         transparent: true,
         alwaysOnTop: true,
         skipTaskbar: false,
-        hasShadow: true,
+        hasShadow: false,
         resizable: true,
         backgroundColor: 'rgba(0, 0, 0, 0)',
         webPreferences: {
