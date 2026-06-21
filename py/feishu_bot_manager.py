@@ -397,25 +397,25 @@ class FeishuClient:
                     state["text_buffer"] += content
                     state["image_buffer"] += content
                     
-                    # 分段发送
+                    # 分段发送（结构感知：不切断代码块/表格）
                     if state["text_buffer"]:
                         buffer = state["text_buffer"]
-                        split_pos = -1
-                        for sep in self.separators:
-                            pos = buffer.find(sep)
-                            if pos != -1:
-                                split_pos = pos + len(sep)
+                        while True:
+                            chunk, buffer = self._take_sendable_unit(buffer)
+                            if chunk is None:
                                 break
-                        if split_pos != -1:
-                            chunk_to_send = buffer[:split_pos]
-                            state["text_buffer"] = buffer[split_pos:]
-                            clean = self._clean_text(chunk_to_send)
+                            clean = self._clean_text(chunk)
                             if clean: await self._send_text(msg, clean)
+                        state["text_buffer"] = buffer
             
             # 处理收尾
             self._extract_images(state)
             if state["text_buffer"]:
-                clean = self._clean_text(state["text_buffer"])
+                leftover = state["text_buffer"]
+                # 收尾时若存在未闭合的代码块围栏，补上闭合围栏以保证卡片正确渲染
+                if leftover.count("```") % 2 == 1:
+                    leftover = leftover.rstrip() + "\n```"
+                clean = self._clean_text(leftover)
                 if clean: await self._send_text(msg, clean)
             for img_url in state["image_cache"]: await self._send_image(msg, img_url)
             
@@ -529,21 +529,91 @@ class FeishuClient:
         pattern = r'!\[.*?\]\((https?://[^\s\)]+)'
         for match in re.finditer(pattern, state["image_buffer"]): state["image_cache"].append(match.group(1))
     
+    def _is_table_line(self, line: str) -> bool:
+        s = line.strip()
+        return s.startswith("|") and s.count("|") >= 2
+
+    def _take_sendable_unit(self, buffer: str):
+        """从缓冲区头部取出一个"完整且可安全发送"的单元。
+        永远不会切断围栏代码块或 Markdown 表格。
+        返回 (chunk, remaining)；若暂时没有完整单元可发送，返回 (None, buffer) 等待更多内容。"""
+        if not buffer:
+            return None, buffer
+
+        nl = buffer.find("\n")
+        first_line = buffer if nl == -1 else buffer[:nl]
+
+        # 1) 代码块：缓冲区开头是围栏，必须等到闭合围栏后整体发送
+        if first_line.lstrip().startswith("```"):
+            open_end = (nl + 1) if nl != -1 else len(buffer)
+            close = buffer.find("```", open_end)
+            if close == -1:
+                return None, buffer
+            close_nl = buffer.find("\n", close)
+            if close_nl == -1:
+                return None, buffer
+            return buffer[:close_nl + 1], buffer[close_nl + 1:]
+
+        # 2) 表格：累积连续的表格行，等出现"完整的"非表格行确认表格结束后整体发送
+        if self._is_table_line(first_line):
+            ends_nl = buffer.endswith("\n")
+            lines = buffer.split("\n")
+            # buffer 末尾若没有换行符，最后一个分片是尚未接收完整的行，不能用于判断
+            last_complete = len(lines) if ends_nl else len(lines) - 1
+            i = 0
+            while i < len(lines) and self._is_table_line(lines[i]):
+                i += 1
+            # 终止行必须是一个"完整且非空"的非表格行，否则可能是流式分片边界，需继续等待
+            if i >= last_complete:
+                return None, buffer
+            if lines[i] == "" and i == len(lines) - 1:
+                return None, buffer
+            chunk = "\n".join(lines[:i]) + "\n"
+            remaining = "\n".join(lines[i:])
+            return chunk, remaining
+
+        # 3) 普通文本：按配置的分隔符在最早位置切分，但不得越过后续代码块的起始
+        split_pos = -1
+        for sep in self.separators:
+            pos = buffer.find(sep)
+            if pos != -1:
+                end = pos + len(sep)
+                if split_pos == -1 or end < split_pos:
+                    split_pos = end
+        fence = buffer.find("```")
+        if fence > 0 and (split_pos == -1 or fence < split_pos):
+            return buffer[:fence], buffer[fence:]
+        if split_pos == -1:
+            return None, buffer
+        return buffer[:split_pos], buffer[split_pos:]
+
     def _clean_text(self, text: str) -> str:
-        text = re.sub(r"!\[.*?\]\(.*?\)", "", text)
-        text = re.sub(r'<.*?>', '', text)
-        return text.strip()
+        # 按代码块分段，代码块内部原样保留（避免误删 <T> 等内容），仅清理代码块之外的图片/HTML 标签与独立分割线
+        parts = re.split(r'(```[\s\S]*?```)', text)
+        out = []
+        for i, part in enumerate(parts):
+            if i % 2 == 1:
+                out.append(part)
+            else:
+                part = re.sub(r"!\[.*?\]\(.*?\)", "", part)
+                part = re.sub(r'<[^>]+>', '', part)
+                part = re.sub(r'(?m)^[ \t]*([-*_])\1{2,}[ \t]*$', '', part)
+                out.append(part)
+        return "".join(out).strip()
     
     async def _send_text(self, original_msg, text):
         try:
             if not text: return
-            content = json.dumps({"zh_cn": {"content": [[{"tag": "md", "text": text}]]}})
+            # 使用交互卡片(card 2.0)的 markdown 组件发送，支持代码块/表格/分割线等完整 Markdown，
+            # 避免飞书 post 富文本的 md 标签把代码块渲染成 [代码块]。
+            card = {"schema": "2.0", "body": {"elements": [{"tag": "markdown", "content": text}]}}
+            content = json.dumps(card)
             from lark_oapi.api.im.v1 import CreateMessageRequest, CreateMessageRequestBody, ReplyMessageRequest, ReplyMessageRequestBody
             if original_msg.chat_type == "p2p":
-                req = CreateMessageRequest.builder().receive_id_type("chat_id").request_body(CreateMessageRequestBody.builder().receive_id(original_msg.chat_id).msg_type("post").content(content).build()).build()
+                req = CreateMessageRequest.builder().receive_id_type("chat_id").request_body(CreateMessageRequestBody.builder().receive_id(original_msg.chat_id).msg_type("interactive").content(content).build()).build()
                 self.lark_client.im.v1.message.create(req)
             else:
-                req = ReplyMessageRequest.builder().message_id(original_msg.message_id).request_body(ReplyMessageRequestBody.builder().msg_type("post").content(content).build()).build()
+                req = ReplyMessageRequest.builder().message_id(original_msg.message_id).request_body(ReplyMessageRequestBody.builder().msg_type("interactive").content(content).build()).build()
                 self.lark_client.im.v1.message.reply(req)
         except: pass
                 
