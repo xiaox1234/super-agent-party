@@ -16,8 +16,8 @@ def _lazy_pag():
     if _pag is not None:
         return _pag
     import pyautogui
-    _lazy_pag().FAILSAFE = True
-    _lazy_pag().PAUSE = 0.05
+    pyautogui.FAILSAFE = True
+    pyautogui.PAUSE = 0.05
     _pag = pyautogui
     GUI_AVAILABLE = True
     return _pag
