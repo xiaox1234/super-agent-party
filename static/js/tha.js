@@ -1,6 +1,7 @@
 /**
  * THA Desk Pet — full frontend module (PixiJS rendering)
  */
+import { CNNx2M, CNNx2UL, CNNx2VL } from '../libs/anime4k-sr.bundle.js';
 const container = document.getElementById('pixi-container');
 const subtitleEl = document.getElementById('subtitle-container');
 const controlPanel = document.getElementById('control-panel');
@@ -162,7 +163,7 @@ function initPixi() {
   const w = window.innerWidth || 540;
   const h = window.innerHeight || 540;
   app = new PIXI.Application({
-    width: w, height: h, backgroundAlpha: 0, antialias: false,
+    width: w, height: h, backgroundAlpha: 0, antialias: true,
     resolution: window.devicePixelRatio || 1, autoDensity: true,
   });
   container.appendChild(app.view);
@@ -208,40 +209,44 @@ function connectRender() {
   renderWs.onopen = () => { connected = true; _framePending = false; };
   renderWs.onmessage = (e) => {
     if (!(e.data instanceof ArrayBuffer)) return;
-    
-    // 🌟 帧跳跃：如果上一帧还在解码/上传中，直接丢弃中间帧，防止积压
+
     if (_framePending) return;
-    
+
     const now = performance.now();
-    // 🌟 限制渲染帧率上限 ~72 FPS，超出刷新率的帧无意义且加重 GC
     if (now - _lastFrameTime < 14) return;
     _lastFrameTime = now;
-    
+
     _framePending = true;
     const blob = new Blob([e.data], { type: 'image/jpeg' });
-    
-    createImageBitmap(blob)
-      .then((imageBitmap) => {
+
+    (async () => {
+      try {
+        let bitmap = await createImageBitmap(blob);
+        if (SR.enabled) {
+          SR._logFirstFrame(bitmap.width, bitmap.height);
+          const up = await SR.upscale(bitmap);
+          bitmap.close();
+          bitmap = up;
+        }
         _framePending = false;
         if (!sprite || !app) {
-          imageBitmap.close();
+          bitmap.close();
           return;
         }
-
         const oldTex = sprite.texture;
-        const tex = PIXI.Texture.from(imageBitmap);
+        const tex = PIXI.Texture.from(bitmap);
+        if (SR.enabled) tex.baseTexture.mipmap = PIXI.MIPMAP_MODES.ON;
         const updated = updateSprite(tex);
-
         if (updated && oldTex && oldTex !== PIXI.Texture.WHITE) {
-          oldTex.destroy(true); 
+          oldTex.destroy(true);
         } else if (!updated) {
           tex.destroy(true);
         }
-      })
-      .catch((err) => {
+      } catch (err) {
         _framePending = false;
-        console.error('[THA] ImageBitmap async decode failed:', err);
-      });
+        console.error('[THA] Frame error:', err);
+      }
+    })();
   };
   renderWs.onclose = () => { connected = false; setTimeout(connectRender, 3000); };
   renderWs.onerror = () => { renderWs.close(); };
@@ -251,6 +256,162 @@ function disconnectRender() {
   if (renderWs) { renderWs.onclose = null; renderWs.close(); renderWs = null; }
   connected = false;
 }
+
+// ==================== Super-Resolution Manager (Anime4K CNNx2VL WebGPU) ====================
+const SR = {
+  device: null, adapter: null, pipe: null,
+  inTex: null, outTex: null,
+  inCanvas: null, outCanvas: null,
+  method: 'none',
+  mode: 'cnnx2vl',
+  enabled: false,
+  _logged: false,
+  NATIVE: 512,
+  TARGET: 1024,
+
+  async init() {
+    if (navigator.gpu) {
+      try {
+        this.adapter = await navigator.gpu.requestAdapter();
+        this.device = await this.adapter.requestDevice();
+        this.method = 'webgpu';
+        console.log('[SR] WebGPU ready (点击 按钮启用) 设备:', this.adapter.info?.architecture || 'ok');
+      } catch (e) { console.warn('[SR] WebGPU init fail:', e); }
+    }
+    if (this.method === 'none') {
+      this.method = 'canvas';
+      console.log('[SR] Canvas 2D bicubic ready (点击 按钮启用)');
+    }
+  },
+
+  async upscale(bitmap) {
+    if (this.method === 'webgpu') return this._upscaleWebGPU(bitmap);
+    if (this.method === 'canvas') return this._upscaleCanvas(bitmap);
+    return bitmap;
+  },
+
+  _logFirstFrame(width, height) {
+    if (!this._logged) {
+      this._logged = true;
+      console.log('[SR] 首帧超分: ' + width + 'x' + height + ' -> ' + this.TARGET + 'x' + this.TARGET + ' (' + this.method + ')');
+    }
+  },
+
+  async _upscaleWebGPU(bitmap) {
+    if (!this.device) return this._upscaleCanvas(bitmap);
+    try {
+      if (!this.inCanvas) this._initWebGPU();
+      this.device.queue.copyExternalImageToTexture(
+        { source: bitmap, origin: [0, 0] },
+        { texture: this.inTex, origin: [0, 0] },
+        [this.NATIVE, this.NATIVE]
+      );
+      { const e = this.device.createCommandEncoder(); this.pipe.pass(e); this.device.queue.submit([e.finish()]); }
+      this._blit(this.pipe.getOutputTexture());
+      await this.device.queue.onSubmittedWorkDone();
+      this.outCanvas.ctx.drawImage(this.inCanvas.gpu, 0, 0);
+      return createImageBitmap(this.outCanvas.c2d);
+    } catch (e) {
+      console.warn('[SR] WebGPU fail, fallback:', e);
+      return this._upscaleCanvas(bitmap);
+    }
+  },
+
+  _initWebGPU() {
+    const usage = GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT;
+    this.inTex = this.device.createTexture({ size: [this.NATIVE, this.NATIVE], format: 'rgba8unorm', usage });
+    const Klass = { cnnx2m: CNNx2M, cnnx2vl: CNNx2VL, cnnx2ul: CNNx2UL }[this.mode] || CNNx2VL;
+    this.pipe = new Klass({ device: this.device, inputTexture: this.inTex });
+    this.inCanvas = { gpu: new OffscreenCanvas(this.TARGET, this.TARGET), fmt: '' };
+    this.inCanvas.ctx = this.inCanvas.gpu.getContext('webgpu');
+    this.inCanvas.fmt = navigator.gpu.getPreferredCanvasFormat();
+    this.inCanvas.ctx.configure({ device: this.device, format: this.inCanvas.fmt, alphaMode: 'opaque' });
+    this.blitObj = this._buildBlit();
+    this.outCanvas = {
+      c2d: new OffscreenCanvas(this.TARGET, this.TARGET),
+      ctx: null
+    };
+    this.outCanvas.ctx = this.outCanvas.c2d.getContext('2d', { willReadFrequently: true });
+  },
+
+  _buildBlit() {
+    const code = `
+      @group(0) @binding(0) var samp: sampler;
+      @group(0) @binding(1) var tex: texture_2d<f32>;
+      struct VO { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
+      @vertex fn vs(@builtin(vertex_index) i: u32) -> VO {
+        var p = array<vec2f,6>(vec2f(-1,-1),vec2f(1,-1),vec2f(-1,1),vec2f(-1,1),vec2f(1,-1),vec2f(1,1));
+        var o: VO; o.pos = vec4f(p[i],0,1); o.uv = vec2f((p[i].x+1)/2,(1-p[i].y)/2); return o;
+      }
+      @fragment fn fs(@location(0) uv: vec2f) -> @location(0) vec4f { return textureSample(tex, samp, uv); }`;
+    const shader = this.device.createShaderModule({ code });
+    const pipeline = this.device.createRenderPipeline({
+      layout: 'auto',
+      vertex: { module: shader, entryPoint: 'vs' },
+      fragment: { module: shader, entryPoint: 'fs', targets: [{ format: this.inCanvas.fmt }] },
+      primitive: { topology: 'triangle-list' }
+    });
+    return { pipeline, sampler: this.device.createSampler({ magFilter: 'linear', minFilter: 'linear' }) };
+  },
+
+  _blit(tex) {
+    const bg = this.device.createBindGroup({
+      layout: this.blitObj.pipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: this.blitObj.sampler },
+        { binding: 1, resource: tex.createView() }
+      ]
+    });
+    const enc = this.device.createCommandEncoder();
+    const pass = enc.beginRenderPass({
+      colorAttachments: [{
+        view: this.inCanvas.ctx.getCurrentTexture().createView(),
+        loadOp: 'clear', storeOp: 'store', clearValue: { r: 0, g: 1, b: 0, a: 1 }
+      }]
+    });
+    pass.setPipeline(this.blitObj.pipeline);
+    pass.setBindGroup(0, bg);
+    pass.draw(6);
+    pass.end();
+    this.device.queue.submit([enc.finish()]);
+  },
+
+  _cleanupWebGPU() {
+    this.pipe = null;
+    if (this.inTex) { try { this.inTex.destroy(); } catch(e) {} this.inTex = null; }
+    this.inCanvas = null;
+    this.outCanvas = null;
+    this.blitObj = null;
+  },
+
+  _upscaleCanvas(bitmap) {
+    const c = new OffscreenCanvas(this.TARGET, this.TARGET);
+    const ctx = c.getContext('2d');
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(bitmap, 0, 0, this.TARGET, this.TARGET);
+    return createImageBitmap(c);
+  },
+
+  setEnabled(v) {
+    this.enabled = v && this.method !== 'none';
+    if (!this.enabled) this._cleanupWebGPU();
+    return this.enabled;
+  },
+
+  destroy() {
+    this._cleanupWebGPU();
+    if (this.device) { try { this.device.destroy(); } catch(e) {} this.device = null; }
+    this.method = 'none';
+    this.enabled = false;
+  },
+
+  getLabel() {
+    if (!this.enabled) return 'SR: off';
+    const names = { cnnx2m: 'CNNx2M', cnnx2vl: 'CNNx2VL', cnnx2ul: 'CNNx2UL' };
+    return 'SR: ' + (names[this.mode] || 'CNNx2VL') + ' (1024p)';
+  }
+};
 
 // ==================== Mouse Tracking & Auto Hide ====================
 let isAutoHideEnabled = false;
@@ -948,6 +1109,25 @@ try {
 if (app) {
   setupHideModel();
 }
+SR.init().then(async () => {
+  try {
+    const res = await fetch('/tha_config');
+    const cfg = await res.json();
+    const mode = cfg.THAConfig?.srMode || 'cnnx2vl';
+    if (mode === 'off' || SR.method === 'none') {
+      console.log('[SR] 配置: 关闭 (mode=' + mode + ', method=' + SR.method + ')');
+    } else {
+      SR.mode = mode;
+      SR.setEnabled(true);
+      console.log('[SR] 配置已启用 -> ' + SR.getLabel());
+    }
+  } catch (e) {
+    if (SR.method !== 'none') {
+      SR.setEnabled(true);
+      console.log('[SR] 无法读取配置，默认启用 CNNx2VL');
+    }
+  }
+});
 connectRender();
 connectTTS();
 loadModelList();

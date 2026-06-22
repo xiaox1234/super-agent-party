@@ -73,6 +73,7 @@
 "@vueuse/metadata@9.13.0","MIT","https://github.com/vueuse/vueuse"
 "@vueuse/shared@9.13.0","MIT","https://github.com/vueuse/vueuse"
 "ansi-regex@5.0.1","MIT","https://github.com/chalk/ansi-regex"
+"anime4k-webgpu@1.0.0","MIT","https://github.com/Anime4KWebBoost/Anime4K-WebGPU"
 "argparse@2.0.1","Python-2.0","https://github.com/nodeca/argparse"
 "async-validator@4.2.5","MIT","https://github.com/yiminghe/async-validator"
 "asynckit@0.4.0","MIT","https://github.com/alexindigo/asynckit"

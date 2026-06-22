@@ -362,8 +362,13 @@ class THAEngine:
 
         self._loaded = True
 
-    def render(self, pose: np.ndarray) -> bytes:
-        """渲染一帧, 返回 JPEG bytes"""
+    def render(self, pose: np.ndarray, quality: int = 50) -> bytes:
+        """渲染一帧, 返回 JPEG bytes
+
+        Args:
+            pose: 45维姿态参数
+            quality: JPEG编码质量 (1-100), 较高值给前端超分提供更干净的输入
+        """
         if not self._loaded:
             self.load()
 
@@ -418,7 +423,7 @@ class THAEngine:
             raise RuntimeError(f"Unsupported channel count: {C}")
 
         rgb_out = np.ascontiguousarray(result.transpose(1, 2, 0))
-        return simplejpeg.encode_jpeg(rgb_out, quality=50, colorspace='RGB', colorsubsampling='422')
+        return simplejpeg.encode_jpeg(rgb_out, quality=quality, colorspace='RGB', colorsubsampling='422')
 
     @property
     def loaded(self) -> bool:
@@ -460,7 +465,7 @@ class CoreMLTHAEngine:
         print(f"🍎 [THA] ===============================================\n")
         self._loaded = True
 
-    def render(self, pose: np.ndarray) -> bytes:
+    def render(self, pose: np.ndarray, quality: int = 50) -> bytes:
         if not self._loaded:
             self.load()
 
@@ -493,7 +498,7 @@ class CoreMLTHAEngine:
             raise RuntimeError(f"Unsupported channel count: {C}")
 
         rgb_out = np.ascontiguousarray(result.transpose(1, 2, 0))
-        return simplejpeg.encode_jpeg(rgb_out, quality=50, colorspace='RGB', colorsubsampling='422')
+        return simplejpeg.encode_jpeg(rgb_out, quality=quality, colorspace='RGB', colorsubsampling='422')
 
     @property
     def loaded(self) -> bool:
