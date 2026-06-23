@@ -5979,6 +5979,319 @@ function updateElement(el, rawMarkdown, formatFn) {
 
                 </el-tabs>
               </div>
+              <!-- 日记系统界面 -->
+              <div v-show="subMenu === 'diary'" class="page mcp-container">
+
+                <!-- 顶部全局 Banner -->
+                <div class="market-link-banner behavior-banner">
+                  <div class="banner-main" style="justify-content: space-between; padding: 0 20px;">
+                    <div style="display: flex; align-items: center; gap: 15px;">
+                      <div class="banner-icon-box">
+                        <i class="fa-solid fa-book"></i>
+                      </div>
+                      <div class="banner-text">
+                        <h3>{{ t('DiarySystem') || '日记系统' }}</h3>
+                        <p style="margin: 5px 0 0 0; opacity: 0.9; font-size: 12px;">
+                          {{ t('diarySystemNotice') }}
+                        </p>
+                      </div>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                      <span style="font-weight: bold;">{{ t('enable') }}</span>
+                      <el-switch v-model="diarySettings.enabled" @change="autoSaveSettings"
+                                 style="--el-switch-on-color: #13ce66;"></el-switch>
+                    </div>
+                  </div>
+                </div>
+
+                <el-tabs v-model="activeDiaryTab" @tab-change="handleDiaryTabChange">
+
+                  <!-- Tab 1: 配置 -->
+                  <el-tab-pane :label="t('diaryConfig') || '系统配置'" name="config">
+                    <el-form :model="diarySettings" class="settings-form" label-position="top">
+
+                      <!-- 触发节奏 -->
+                      <div class="tool-item">
+                        <div class="tool-header">
+                          <div class="header-left">
+                            <span>
+                              <el-icon><i class="fa-solid fa-clock"></i></el-icon>
+                              {{ t('diaryRhythm') || '触发节奏' }}
+                            </span>
+                          </div>
+                        </div>
+                        <div class="tool-content">
+                          <div class="sub-config-box">
+                            <el-form-item :label="t('diaryInterval') || '随机触发间隔（分钟）'">
+                              <el-slider v-model="diaryIntervalRange" range :min="1" :max="180" :step="1"
+                                         show-input style="width: 100%;"></el-slider>
+                            </el-form-item>
+                            <el-form-item :label="t('diaryQuietWindow') || '夜间静默时段（点）'">
+                              <el-row :gutter="12" style="width: 100%;">
+                                <el-col :span="12">
+                                  <el-input-number v-model="diarySettings.quietStart" :min="0" :max="23"
+                                                   controls-position="right" style="width: 100%;"
+                                                   @change="autoSaveSettings"></el-input-number>
+                                </el-col>
+                                <el-col :span="12">
+                                  <el-input-number v-model="diarySettings.quietEnd" :min="0" :max="23"
+                                                   controls-position="right" style="width: 100%;"
+                                                   @change="autoSaveSettings"></el-input-number>
+                                </el-col>
+                              </el-row>
+                              <div class="form-tip" style="margin-top: 6px; font-size: 12px; color: #909399;">
+                                {{ t('diaryQuietHint') || '此时间段内不触发（起止相同表示不静默）' }}
+                              </div>
+                            </el-form-item>
+                          </div>
+                        </div>
+                      </div>
+
+                      <!-- 动作类型与权重 -->
+                      <div class="tool-item">
+                        <div class="tool-header">
+                          <div class="header-left">
+                            <span>
+                              <el-icon><i class="fa-solid fa-wand-magic-sparkles"></i></el-icon>
+                              {{ t('diaryActions') || '动作类型与权重' }}
+                            </span>
+                          </div>
+                        </div>
+                        <div class="tool-content">
+                          <el-alert type="warning" :closable="false" class="mb-4">
+                            <template #default>
+                              <div class="alert-content">
+                                {{ t('diaryToolNotice') || '联网搜索 / 知识库等动作仅允许 AI 使用只读低权限工具，不会执行电脑控制、代码或文件操作。' }}
+                              </div>
+                            </template>
+                          </el-alert>
+                          <div class="events-management-list" style="width: 100%;">
+                            <div v-for="key in ['think','webSearch','knowledge','imMessage','browserControl','smartHome']" :key="key"
+                                 class="event-row-item diary-action-row"
+                                 style="margin-bottom: 12px; display: flex; align-items: center; gap: 14px;">
+                              <el-switch v-model="diarySettings.actions[key].enabled" @change="onDiaryActionToggle(key)"></el-switch>
+                              <el-tag :type="diaryMeta(key).type" effect="light" size="large" style="min-width: 130px; text-align: left;">
+                                <i :class="diaryMeta(key).icon" style="margin-right: 6px;"></i>
+                                {{ t('diaryAction_' + key) || key }}
+                              </el-tag>
+                              <span style="flex: 1; display: flex; align-items: center; gap: 10px;">
+                                <span style="font-size: 12px; color: #909399; white-space: nowrap;">{{ t('diaryWeight') || '权重' }}</span>
+                                <el-slider v-model="diarySettings.actions[key].weight" :min="1" :max="10" :step="1"
+                                           :disabled="!diarySettings.actions[key].enabled"
+                                           show-input style="flex: 1;" @change="autoSaveSettings"></el-slider>
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <!-- 推送渠道 -->
+                      <div class="tool-item">
+                        <div class="tool-header">
+                          <div class="header-left">
+                            <span>
+                              <el-icon><i class="fa-solid fa-share-nodes"></i></el-icon>
+                              {{ t('diaryPushChannels') || '推送渠道' }}
+                            </span>
+                          </div>
+                        </div>
+                        <div class="tool-content">
+                          <div class="sub-config-box">
+                            <el-form-item :label="t('diaryImTargets') || '主动发消息的渠道（不选则仅写入日记本）'">
+                              <el-select v-model="diarySettings.imTargets" multiple filterable clearable
+                                         class="full-width-input" style="width: 100%;" @change="autoSaveSettings"
+                                         :placeholder="t('diaryImTargetsPlaceholder') || '选择渠道，将发送到对应机器人已配置的会话'">
+                                <el-option :label="t('diaryImTargetChat') || '软件主界面（网页对话）'" value="chat"></el-option>
+                                <el-option label="微信" value="wechat"></el-option>
+                                <el-option label="飞书" value="feishu"></el-option>
+                                <el-option label="钉钉" value="dingtalk"></el-option>
+                                <el-option label="企业微信" value="wecom"></el-option>
+                                <el-option label="Telegram" value="telegram"></el-option>
+                                <el-option label="Discord" value="discord"></el-option>
+                                <el-option label="Slack" value="slack"></el-option>
+                              </el-select>
+                            </el-form-item>
+                          </div>
+                        </div>
+                      </div>
+
+                      <!-- 人格指引 -->
+                      <div class="tool-item">
+                        <div class="tool-header">
+                          <div class="header-left">
+                            <span>
+                              <el-icon><i class="fa-solid fa-feather-pointed"></i></el-icon>
+                              {{ t('diaryPrompt') || '写日记的人格指引' }}
+                            </span>
+                          </div>
+                        </div>
+                        <div class="tool-content">
+                          <el-input v-model="diarySettings.prompt" type="textarea" :rows="6"
+                                    :placeholder="t('diaryPromptPlaceholder') || '描述 AI 写日记时应保持的角色与风格...'"
+                                    @change="autoSaveSettings"></el-input>
+                        </div>
+                      </div>
+
+                      <!-- 对话集成 -->
+                      <div class="tool-item">
+                        <div class="tool-header">
+                          <div class="header-left">
+                            <span>
+                              <el-icon><i class="fa-solid fa-comments"></i></el-icon>
+                              {{ t('diaryChatIntegration') || '对话集成' }}
+                            </span>
+                          </div>
+                        </div>
+                        <div class="tool-content">
+                          <div class="sub-config-box">
+                            <el-form-item :label="t('diaryChatIntegrationLabel') || '将近期日记注入角色对话上下文'" class="form-item-align" label-position="left">
+                              <el-switch v-model="diarySettings.chatIntegration.enabled" @change="autoSaveSettings"></el-switch>
+                            </el-form-item>
+                            <el-form-item :label="t('diaryChatIntegrationMax') || '参考最近 N 条日记'"
+                                          v-if="diarySettings.chatIntegration.enabled" class="form-item-align" label-position="left">
+                              <el-input-number v-model="diarySettings.chatIntegration.maxEntries" :min="1" :max="20"
+                                               @change="autoSaveSettings"></el-input-number>
+                            </el-form-item>
+                          </div>
+                        </div>
+                      </div>
+
+                      <!-- 聊天总结 -->
+                      <div class="tool-item">
+                        <div class="tool-header">
+                          <div class="header-left">
+                            <span>
+                              <el-icon><i class="fa-solid fa-clock"></i></el-icon>
+                              {{ t('diaryChatSummary') || '聊天总结' }}
+                            </span>
+                          </div>
+                        </div>
+                        <div class="tool-content">
+                          <div class="sub-config-box">
+                            <el-form-item :label="t('diaryChatSummaryLabel') || '用户未对话超过 N 分钟后自动总结到日记'" class="form-item-align" label-position="left">
+                              <el-switch v-model="diarySettings.chatSummary.enabled" @change="autoSaveSettings"></el-switch>
+                            </el-form-item>
+                            <el-form-item :label="t('diaryChatSummaryIdle') || '空闲分钟数'"
+                                          v-if="diarySettings.chatSummary.enabled" class="form-item-align" label-position="left">
+                              <el-input-number v-model="diarySettings.chatSummary.idleMinutes" :min="5" :max="120"
+                                               @change="autoSaveSettings"></el-input-number>
+                            </el-form-item>
+                          </div>
+                        </div>
+                      </div>
+
+                    </el-form>
+                  </el-tab-pane>
+
+                  <!-- Tab 2: 日记本 -->
+                  <el-tab-pane :label="t('diaryBook') || '日记本'" name="data">
+                    <div class="tool-item">
+                      <div class="tool-content">
+
+                        <!-- 角色日记本切换条 -->
+                        <div class="diary-book-switcher">
+                          <div v-for="book in diaryBooks" :key="book.bookId"
+                               class="diary-book-chip"
+                               :class="{ active: diaryCurrentBook === book.bookId }"
+                               @click="switchDiaryBook(book.bookId)">
+                            <span class="diary-book-avatar">
+                              <img v-if="diaryBookAvatar(book)" :src="diaryBookAvatar(book)" alt="">
+                              <i v-else-if="book.isDefault || book.bookId === 'default'" class="fa-solid fa-feather"></i>
+                              <i v-else class="fa-solid fa-user-astronaut"></i>
+                            </span>
+                            <span class="diary-book-name">{{ diaryBookLabel(book) }}</span>
+                            <span class="diary-book-count">{{ book.count }}</span>
+                          </div>
+                        </div>
+
+                        <div class="diary-toolbar">
+                          <div class="diary-search-box">
+                            <el-input v-model="diarySearchQuery" :placeholder="t('diarySearch') || '搜索日记...'" clearable>
+                              <template #prefix>
+                                <el-icon><i class="fa-solid fa-magnifying-glass"></i></el-icon>
+                              </template>
+                            </el-input>
+                          </div>
+                          <el-button @click="refreshDiaryView" circle :title="t('refresh') || '刷新'">
+                            <i class="fa-solid fa-rotate-right"></i>
+                          </el-button>
+                        </div>
+
+                        <!-- 空状态 -->
+                        <el-empty v-if="!filteredDiaryEntries.length"
+                                  :description="t('diaryEmpty') || '还没有日记，AI 会在独处时悄悄写下它的想法'"></el-empty>
+
+                        <!-- 时间流 / 时间线 -->
+                        <div v-else class="diary-timeline">
+                          <div class="diary-tl-item" v-for="entry in filteredDiaryEntries" :key="entry.id"
+                               @click="openDiaryDetail(entry)">
+                            <div class="diary-tl-axis">
+                              <span class="diary-tl-dot" :data-type="diaryMeta(entry.type).type">
+                                <i :class="diaryMeta(entry.type).icon"></i>
+                              </span>
+                            </div>
+                            <div class="diary-tl-body">
+                              <div class="diary-tl-head">
+                                <span class="diary-tl-time">
+                                  <i class="fa-solid fa-clock"></i>
+                                  {{ entry.time ? new Date(entry.time).toLocaleString() : '' }}
+                                </span>
+                                <el-tag :type="diaryMeta(entry.type).type" effect="light" size="small" round>
+                                  {{ t('diaryAction_' + entry.type) || entry.type }}
+                                </el-tag>
+                              </div>
+                              <div class="diary-tl-title">{{ entry.title || entry.content }}</div>
+                              <div class="diary-tl-snippet">{{ entry.content }}</div>
+                              <div class="diary-tl-foot">
+                                <div class="diary-tl-pushed">
+                                  <el-tag v-for="p in (entry.pushedTo || [])" :key="p" size="small" type="info" effect="plain" round>{{ p }}</el-tag>
+                                </div>
+                                <div class="diary-tl-actions">
+                                  <span class="diary-tl-readmore">{{ t('diaryViewDetail') || '查看详情' }} <i class="fa-solid fa-angle-right"></i></span>
+                                  <el-button @click.stop="deleteDiaryEntryById(entry.id)" type="danger" circle size="small" plain>
+                                    <i class="fa-solid fa-trash"></i>
+                                  </el-button>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </el-tab-pane>
+
+                </el-tabs>
+
+                <!-- 日记详情（markdown 渲染） -->
+                <el-dialog v-model="diaryDetailVisible" class="diary-detail-dialog" width="640px"
+                           align-center append-to-body @close="closeDiaryDetail">
+                  <template #header>
+                    <div v-if="diaryDetailEntry" class="diary-detail-header">
+                      <el-tag :type="diaryMeta(diaryDetailEntry.type).type" effect="dark" size="large" round>
+                        <i :class="diaryMeta(diaryDetailEntry.type).icon" style="margin-right: 6px;"></i>
+                        {{ t('diaryAction_' + diaryDetailEntry.type) || diaryDetailEntry.type }}
+                      </el-tag>
+                      <span class="diary-detail-time">
+                        <i class="fa-solid fa-clock"></i>
+                        {{ diaryDetailEntry.time ? new Date(diaryDetailEntry.time).toLocaleString() : '' }}
+                      </span>
+                    </div>
+                  </template>
+                  <div v-if="diaryDetailEntry" class="diary-detail">
+                    <div class="diary-detail-content markdown-body" v-html="formatMessage(diaryDetailEntry.content, -1)"></div>
+                    <div v-if="diaryDetailEntry.pushedTo && diaryDetailEntry.pushedTo.length" class="diary-detail-pushed">
+                      <span class="diary-detail-pushed-label">{{ t('diaryPushChannels') || '推送渠道' }}:</span>
+                      <el-tag v-for="p in diaryDetailEntry.pushedTo" :key="p" size="small" type="info" effect="plain" round>{{ p }}</el-tag>
+                    </div>
+                  </div>
+                  <template #footer>
+                    <el-button v-if="diaryDetailEntry" @click="deleteDiaryEntryById(diaryDetailEntry.id)" type="danger" plain>
+                      <i class="fa-solid fa-trash" style="margin-right: 6px;"></i>{{ t('delete') || '删除' }}
+                    </el-button>
+                    <el-button @click="closeDiaryDetail">{{ t('close') || '关闭' }}</el-button>
+                  </template>
+                </el-dialog>
+              </div>
               <!-- 新增表情包界面 -->
               <div v-show="subMenu === 'sticker'" class="page">
                 <div class="provider-grid">
@@ -12633,6 +12946,30 @@ function updateElement(el, rawMarkdown, formatFn) {
                         </el-select>
                       </el-form-item>
 
+                    </div>
+                  </div>
+
+                  <!-- ===== CSS 注入设置 ===== -->
+                  <div class="tool-item">
+                    <div class="tool-header">
+                      <span>
+                        <el-icon>
+                          <i class="fa-solid fa-code"></i>
+                        </el-icon>
+                        {{ t('customCSS') || 'CSS 注入' }}
+                      </span>
+                    </div>
+                    <div class="tool-content">
+                      <el-form-item :label="t('customCSSDesc') || '注入自定义 CSS 样式，可覆盖任意界面样式'" class="form-item-align">
+                        <el-input
+                          v-model="systemSettings.customCSS"
+                          type="textarea"
+                          :rows="8"
+                          :placeholder="t('customCSSPlaceholder') || '在此输入 CSS 代码...'"
+                          class="custom-css-textarea"
+                          @change="autoSaveSettings"
+                        ></el-input>
+                      </el-form-item>
                     </div>
                   </div>
 

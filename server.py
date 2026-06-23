@@ -76,6 +76,9 @@ from py.task_tools import (
     create_subtask, cancel_subtask, finish_task, finish_main_task,
 )
 from py.load_files import get_files_content, file_tool, image_tool
+from py.diary_query_tool import diary_query_tool, diary_books_tool, handle_query_diary, handle_list_diary_books
+from py.diary_chat_integration import append_to_chat_buffer, update_buffer_identity, get_chat_buffer
+from py.diary_system import get_recent_diary_entries, DEFAULT_BOOK_ID as DIARY_DEFAULT_BOOK
 
 import shortuuid
 os.environ["MEM0_TELEMETRY"] = "False"
@@ -775,6 +778,16 @@ async def lifespan(app: FastAPI):
     scheduler = AgentScheduler(settings)
     scheduler_task = asyncio.create_task(scheduler.start_loop())
 
+    # --- [日记系统引擎初始化] ---
+    # 引擎循环常驻，未启用时空转；保存设置时通过 update_config 热更新。
+    try:
+        from py.diary_engine import global_diary_engine
+        global_diary_engine.update_config((settings or {}).get("diarySettings"))
+        diary_engine_task = asyncio.create_task(global_diary_engine.start())
+    except Exception as e:
+        print(f"日记引擎启动异常: {e}")
+        diary_engine_task = None
+
     # --- [日志系统初始化] ---
 
     timestamp = time.time()
@@ -960,6 +973,13 @@ async def lifespan(app: FastAPI):
 
     if scheduler_task:
         scheduler_task.cancel()
+    try:
+        if diary_engine_task:
+            from py.diary_engine import global_diary_engine
+            global_diary_engine.stop()
+            diary_engine_task.cancel()
+    except Exception as e:
+        print(f"日记引擎停止异常: {e}")
     from py.node_runner import node_mgr
     ext_ids = list(node_mgr.exts.keys())
     for ext_id in ext_ids:
@@ -1174,6 +1194,8 @@ async def dispatch_tool(tool_name: str, tool_params: dict, settings: dict,is_sub
         "get_wikipedia_section_content": get_wikipedia_section_content,
         "search_arxiv_papers": search_arxiv_papers,
         "auto_behavior": auto_behavior,
+        "query_diary": handle_query_diary,
+        "list_diary_books": handle_list_diary_books,
         "list_pages": list_pages,
         "new_page": new_page,
         "close_page": close_page,
@@ -3549,6 +3571,9 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
             tools.append(wikipedia_section_tool)
         if settings["tools"]["arxiv"]['enabled']:
             tools.append(arxiv_tool)
+        if (settings.get("diarySettings", {}) or {}).get("enabled", False):
+            tools.append(diary_query_tool)
+            tools.append(diary_books_tool)
         if settings['text2imgSettings']['enabled']:
             if settings['text2imgSettings']['engine'] == 'pollinations' and not _is_steam_build:
                 tools.append(pollinations_image_tool)
@@ -3677,6 +3702,28 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                 settings["memorySettings"]["genericSystemPrompt"] = settings["memorySettings"]["genericSystemPrompt"].replace("{{char}}", cur_memory["name"])
                 content_append(request.messages, 'system', "\n\n" + settings["memorySettings"]["genericSystemPrompt"] + "\n\n")
 
+        # ========== 日记集成：将近期日记注入对话上下文 ==========
+        diary_cfg = (settings.get("diarySettings", {}) or {}).get("chatIntegration", {}) or {}
+        if diary_cfg.get("enabled", False) and not request.is_sub_agent:
+            try:
+                ms = (settings or {}).get("memorySettings", {}) or {}
+                diary_book_id = DIARY_DEFAULT_BOOK
+                if ms.get("is_memory") and ms.get("selectedMemory"):
+                    diary_book_id = ms.get("selectedMemory")
+                max_entries = max(1, int(diary_cfg.get("maxEntries", 5) or 5))
+                recent = await get_recent_diary_entries(diary_book_id, max_entries)
+                if recent:
+                    diary_lines = []
+                    for e in recent:
+                        t = e.get("title", "") or e.get("content", "")[:24]
+                        diary_lines.append(f"- [{e.get('time', '')[:16]}] ({e.get('type', '')}) {t}: {e.get('content', '')[:200]}")
+                    diary_text = "\n".join(diary_lines)
+                    content_append(request.messages, 'system',
+                        "\n\n[角色日记 - 近期回忆]\n以下是该角色最近的日记记录，可供你参考其心境和经历：\n" + diary_text + "\n")
+                    print(f"📔 [日记集成] 已注入 {len(recent)} 条日记到对话上下文")
+            except Exception as e:
+                print(f"[日记集成] 提取日记失败: {e}")
+
         # ========== 动态上下文收集（统一追加到用户消息末尾） ==========
         dynamic_user_context = ""
 
@@ -3726,6 +3773,19 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                 request.messages[-1]['content'] += dynamic_user_context
         
         request = await tools_change_messages(request, settings)
+        # ========== 对话缓冲：记录用户消息用于闲时自动总结 ==========
+        try:
+            diary_settings = (settings.get("diarySettings", {}) or {})
+            if diary_settings.get("enabled", False) and diary_settings.get("chatSummary", {}).get("enabled", True):
+                ms = (settings or {}).get("memorySettings", {}) or {}
+                buffer_key = ms.get("selectedMemory") or DIARY_DEFAULT_BOOK
+                update_buffer_identity(buffer_key, book_id=buffer_key,
+                                       character_name=(ms.get("userName") or ""))
+                last_msg = request.messages[-1] if request.messages else None
+                if last_msg and last_msg.get("role") == "user":
+                    append_to_chat_buffer(buffer_key, "user", _extract_text_content(last_msg.get("content", "")))
+        except Exception as e:
+            print(f"[DiaryBuffer] 记录对话缓冲失败: {e}")
         # 如果系统消息为空字符串或者仅包含空白符，则将系统消息改成"you are a helpful assistant."
         if request.messages[0]['role'] == 'system' and not request.messages[0]['content'].strip():
             request.messages[0]['content'] = "you are a helpful assistant."
@@ -5449,6 +5509,16 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                         await extract_and_update_affection(full_content)
                     except Exception as e:
                         print(f"解析好感度标签出错: {e}")
+                # ========== 对话缓冲：记录助手回复用于闲时自动总结 ==========
+                try:
+                    diary_settings_inner = (settings.get("diarySettings", {}) or {})
+                    if diary_settings_inner.get("enabled", False) and diary_settings_inner.get("chatSummary", {}).get("enabled", True):
+                        ms = (settings or {}).get("memorySettings", {}) or {}
+                        buffer_key = ms.get("selectedMemory") or DIARY_DEFAULT_BOOK
+                        if full_content:
+                            append_to_chat_buffer(buffer_key, "assistant", full_content)
+                except Exception as e:
+                    print(f"[DiaryBuffer] 记录助手回复失败: {e}")
                 if m0 and not request.is_sub_agent:
                     print("记忆更新任务开始提交")
                     messages = f"用户说：{user_prompt}\n\n---\n\n你说：{full_content}"
@@ -5743,6 +5813,9 @@ async def generate_complete_response(client,reasoner_client, request: ChatReques
         tools.append(wikipedia_section_tool)
     if settings["tools"]["arxiv"]['enabled']:
         tools.append(arxiv_tool)
+    if (settings.get("diarySettings", {}) or {}).get("enabled", False):
+        tools.append(diary_query_tool)
+        tools.append(diary_books_tool)
     if settings['text2imgSettings']['enabled']:
         if settings['text2imgSettings']['engine'] == 'pollinations' and not _is_steam_build:
             tools.append(pollinations_image_tool)
@@ -11493,6 +11566,11 @@ async def websocket_endpoint(websocket: WebSocket):
                             break
                 await save_settings(settings_dict)
                 await sync_all_bots_behavior(settings_dict)
+                try:
+                    from py.diary_engine import global_diary_engine
+                    global_diary_engine.update_config(settings_dict.get("diarySettings"))
+                except Exception as e:
+                    print(f"日记引擎配置同步异常: {e}")
 
                 await ws_manager.send_json({
                     "type": "settings_saved",
@@ -11797,6 +11875,9 @@ app.include_router(embedding_router)
 
 from py.affection_api import router as affection_router
 app.include_router(affection_router)
+
+from py.diary_api import router as diary_router
+app.include_router(diary_router)
 
 mcp = FastApiMCP(
     app,

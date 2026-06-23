@@ -1094,6 +1094,24 @@ const app = Vue.createApp({
       immediate: true // 组件加载时立刻执行一次
     },
 
+    // 监听自定义 CSS 注入
+    'systemSettings.customCSS': {
+      handler(css) {
+        let styleEl = document.getElementById('custom-css-injection');
+        if (css) {
+          if (!styleEl) {
+            styleEl = document.createElement('style');
+            styleEl.id = 'custom-css-injection';
+            document.head.appendChild(styleEl);
+          }
+          styleEl.textContent = css;
+        } else if (styleEl) {
+          styleEl.remove();
+        }
+      },
+      immediate: true
+    },
+
     'CLISettings.cc_path': {
       handler(newPath) {
         if (newPath) {
@@ -1234,41 +1252,41 @@ const app = Vue.createApp({
           });
         }
 
-        // 完整的主题色映射
-        const themeColors = {
-          light: '#21859c',      // 默认
-          dark: '#ee7e00',       // 橙色
-          midnight: '#21859c',   // 午夜蓝
-          desert: '#d98236',     // 沙漠黄
-          neon: '#ff2d95' ,       // 霓虹粉
-          marshmallow: '#f5a5c3',  // Marshmallow 粉色
-          ink: '#2c3e50',        // 墨水蓝
-          party: '#ed7d00',        // 派对黄
-          rainbow: '#845ec2',        // 彩虹
-        };
+        // Element Plus 在 element-plus.css 中以 :root 定义了 --el-color-primary: #409eff，
+        // 且加载在 styles.css 之后，先前的主题色将因此被覆盖（特异度相同则后载入优先）
+        // 所以 JS 必须以 inline style 设置主色和补全变体，色值与 CSS [data-theme] 块一致
+        const cssPrimary = {
+          light: '#2a7a8c',
+          dark: '#d97706',
+          midnight: '#ee7e00',
+          desert: '#d98236',
+          neon: '#ff2d95',
+          marshmallow: '#f5a5c3',
+          ink: '#2c3e50',
+          party: '#ed7d00',
+          rainbow: '#845ec2',
+        }[newVal];
 
-        // 获取当前主题色
-        const themeColor = themeColors[newVal] || themeColors.light;
-        const root = document.documentElement;
+        if (cssPrimary) {
+          const root = document.documentElement;
+          root.style.setProperty('--el-color-primary', cssPrimary);
+          root.style.setProperty('--el-color-primary-light-9', this.colorBlend(cssPrimary, '#ffffff', 0.1));
+          root.style.setProperty('--el-color-primary-light-8', this.colorBlend(cssPrimary, '#ffffff', 0.2));
+          root.style.setProperty('--el-color-primary-light-7', this.colorBlend(cssPrimary, '#ffffff', 0.3));
+          root.style.setProperty('--el-color-primary-light-6', this.colorBlend(cssPrimary, '#ffffff', 0.4));
+          root.style.setProperty('--el-color-primary-light-5', this.colorBlend(cssPrimary, '#ffffff', 0.5));
+          root.style.setProperty('--el-color-primary-light-4', this.colorBlend(cssPrimary, '#ffffff', 0.6));
+          root.style.setProperty('--el-color-primary-light-3', this.colorBlend(cssPrimary, '#ffffff', 0.7));
+          root.style.setProperty('--el-color-primary-light-2', this.colorBlend(cssPrimary, '#ffffff', 0.8));
+          root.style.setProperty('--el-color-primary-light-1', this.colorBlend(cssPrimary, '#ffffff', 0.9));
+          root.style.setProperty('--el-color-primary-dark-1', this.colorBlend(cssPrimary, '#000000', 0.3));
+          root.style.setProperty('--el-color-primary-dark-2', this.colorBlend(cssPrimary, '#000000', 0.2));
+          root.style.setProperty('--el-color-primary-dark-3', this.colorBlend(cssPrimary, '#000000', 0.1));
 
-        // 设置主色及其衍生色（Element Plus 需要完整的色系）
-        root.style.setProperty('--el-color-primary', themeColor);
-        root.style.setProperty('--el-color-primary-light-9', this.colorBlend(themeColor, '#ffffff', 0.1));
-        root.style.setProperty('--el-color-primary-light-8', this.colorBlend(themeColor, '#ffffff', 0.2));
-        root.style.setProperty('--el-color-primary-light-7', this.colorBlend(themeColor, '#ffffff', 0.3));
-        root.style.setProperty('--el-color-primary-light-6', this.colorBlend(themeColor, '#ffffff', 0.4));
-        root.style.setProperty('--el-color-primary-light-5', this.colorBlend(themeColor, '#ffffff', 0.5));
-        root.style.setProperty('--el-color-primary-light-4', this.colorBlend(themeColor, '#ffffff', 0.6));
-        root.style.setProperty('--el-color-primary-light-3', this.colorBlend(themeColor, '#ffffff', 0.7));
-        root.style.setProperty('--el-color-primary-light-2', this.colorBlend(themeColor, '#ffffff', 0.8));
-        root.style.setProperty('--el-color-primary-light-1', this.colorBlend(themeColor, '#ffffff', 0.9));
-        root.style.setProperty('--el-color-primary-dark-1', this.colorBlend(themeColor, '#000000', 0.3));
-        root.style.setProperty('--el-color-primary-dark-2', this.colorBlend(themeColor, '#000000', 0.2));
-        root.style.setProperty('--el-color-primary-dark-3', this.colorBlend(themeColor, '#000000', 0.1));
-
-        // 强制刷新 Element Plus 主题
-        if (window.__ELEMENT_PLUS_INSTANCE__) {
-          window.__ELEMENT_PLUS_INSTANCE__.config.globalProperties.$ELEMENT.reload();
+          // 强制刷新 Element Plus 主题
+          if (window.__ELEMENT_PLUS_INSTANCE__) {
+            window.__ELEMENT_PLUS_INSTANCE__.config.globalProperties.$ELEMENT.reload();
+          }
         }
       },
       immediate: true
@@ -1409,6 +1427,32 @@ docker-compose -f ${composeFile} up -d`;
         // 确保 userName 存在再进行过滤
         return item.userName && item.userName.toLowerCase().includes(query);
       });
+    },
+    // 日记本：按时间倒序 + 搜索过滤
+    filteredDiaryEntries() {
+      let list = Array.isArray(this.diaryEntries) ? this.diaryEntries.slice() : [];
+      list.sort((a, b) => new Date(b.time) - new Date(a.time));
+      if (this.diarySearchQuery) {
+        const q = this.diarySearchQuery.toLowerCase();
+        list = list.filter(e =>
+          (e.content && e.content.toLowerCase().includes(q)) ||
+          (e.title && e.title.toLowerCase().includes(q)) ||
+          (e.type && e.type.toLowerCase().includes(q))
+        );
+      }
+      return list;
+    },
+    // 日记触发间隔范围（供 el-slider range 双向绑定）
+    diaryIntervalRange: {
+      get() {
+        return [this.diarySettings.minMinutes, this.diarySettings.maxMinutes];
+      },
+      set(val) {
+        if (!Array.isArray(val)) return;
+        this.diarySettings.minMinutes = val[0];
+        this.diarySettings.maxMinutes = val[1];
+        this.autoSaveSettings();
+      }
     },
     computedSkillsList() {
       const skillMap = new Map();

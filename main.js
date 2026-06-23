@@ -350,19 +350,14 @@ const globalConfig = loadEnvVariables();
 let SESSION_CDP_PORT = 0; // 初始为0
 let IS_INTERNAL_MODE_ACTIVE = false;
 
-if (globalConfig?.chromeMCPSettings?.type === 'internal' && globalConfig?.chromeMCPSettings?.enabled) {
-  
-  // ★ 修改点 1：使用端口 '0'，让系统自动分配一个绝对安全的空闲端口
-  app.commandLine.appendSwitch('remote-debugging-port', '0');
-  
-  // ★ 修改点 2：显式绑定到 127.0.0.1，防止防火墙报警
-  app.commandLine.appendSwitch('remote-debugging-address', '127.0.0.1');
-  
-  app.commandLine.appendSwitch('remote-allow-origins', '*');
-  
-  IS_INTERNAL_MODE_ACTIVE = true;
-  console.log('[CDP] 已请求系统自动分配内置浏览器调试端口...');
-}
+// 始终启用内置 CDP 调试端口（127.0.0.1 不对外暴露），
+// 避免运行时需重启才能使用浏览器控制功能。
+// 工具是否可用由 chromeMCPSettings.enabled 前端开关控制。
+app.commandLine.appendSwitch('remote-debugging-port', '0');
+app.commandLine.appendSwitch('remote-debugging-address', '127.0.0.1');
+app.commandLine.appendSwitch('remote-allow-origins', '*');
+IS_INTERNAL_MODE_ACTIVE = true;
+console.log('[CDP] 已请求系统自动分配内置浏览器调试端口...');
 app.commandLine.appendSwitch('js-flags', '--max-old-space-size=4096'); // 允许使用 4GB 内存
 // 新增：检测端口是否可用
 function isPortAvailable(port) {
